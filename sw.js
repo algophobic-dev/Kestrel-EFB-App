@@ -1,7 +1,7 @@
 // Offline support. App files and data: network first, cache fallback.
 // Chart tiles and plates: served from the device when downloaded, else network.
-const SHELL = 'kestrel-shell-v1';
-const FILES = ['./', 'index.html', 'css/app.css', 'vendor/leaflet.js', 'vendor/leaflet.css', 'manifest.webmanifest', 'icons/icon.svg',
+const SHELL = 'kestrel-shell-v2';
+const FILES = ['./', 'index.html', 'css/app.css', 'lib/leaflet.js', 'lib/leaflet.css', 'manifest.webmanifest', 'icons/icon.svg',
   'js/app.js', 'js/config.js', 'js/util.js', 'js/geo.js', 'js/db.js', 'js/wx.js', 'js/route.js', 'js/map.js', 'js/fpl.js', 'js/tabs-ref.js', 'js/tabs-fly.js', 'js/more.js',
   'data/airports.json', 'data/navaids.json', 'data/fixes.json', 'data/runways.json', 'data/freqs.json', 'data/airways.json', 'data/plates.json', 'data/meta.json'];
 const STORED = /tiles\.arcgis\.com|basemap\.nationalmap\.gov|aeronav\.faa\.gov/;
