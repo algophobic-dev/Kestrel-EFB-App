@@ -114,7 +114,6 @@ export const More = {
     this.section = 'about';
     this.detail.replaceChildren(h('div', { class: 'pad' }, this.head('About Kestrel EFB'),
       h('div', { class: 'cards' },
-        card('Planning only', h('p', { style: 'margin:0' }, 'Kestrel EFB is not approved for navigation. Data may be out of date or wrong. Check every route, chart, weather report and NOTAM against official sources before you fly.')),
         card('Data sources', ...[['Charts, airspace, fixes, airways, plates', 'FAA'], ['Airports, runways, frequencies, navaids', 'OurAirports'], ['METAR, TAF, SIGMET', 'National Weather Service'], ['Radar', 'Iowa Environmental Mesonet'], ['Winds aloft, terrain', 'Open-Meteo'], ['Base maps', 'CARTO, OpenStreetMap, USGS']].map(([k, s]) => h('div', { class: 'kv' }, h('span', {}, k), h('span', {}, s)))),
         card('Not included', h('p', { class: 'note', style: 'margin:0' }, 'Flight plan filing, NOTAM text, live traffic, synthetic vision, 3D view, geo-referenced plates, takeoff and landing performance, and climb or descent modeling are not available in this version. Coverage is the United States only.')),
         card('Install', h('p', { class: 'note', style: 'margin:0' }, 'iPad and iPhone: in Safari, select Share, then Add to Home Screen. Mac and Windows: in Chrome or Edge, select the install icon in the address bar.')))));
