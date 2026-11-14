@@ -1,8 +1,28 @@
 # Kestrel EFB
 
-A free flight-planning app for US pilots. It runs in the browser and installs on Mac, Windows, iPad and iPhone.
+A free flight-planning app for US pilots. It runs in the browser and installs on Mac, Windows, iPad, iPhone, and Android.
 
-**Planning only. Not approved for navigation.** Check every route, chart, weather report and NOTAM against official sources before you fly.
+## Install on your device
+
+Kestrel EFB works as an installable web app (PWA) with offline caching. No app store account or payment is required.
+
+### iPhone & iPad (Safari)
+1. Open the live site in **Safari**.
+2. Tap the **Share** button (the square with an upward arrow in the toolbar).
+3. Scroll down and tap **Add to Home Screen**.
+4. Tap **Add** in the top-right corner.
+
+### Android (Chrome)
+1. Open the live site in **Chrome**.
+2. Tap the **three-dot menu** in the top-right corner.
+3. Tap **Install app** or **Add to Home screen**.
+4. Follow the prompt to confirm.
+
+### Mac & Windows (Chrome / Edge / Safari)
+* **Chrome or Edge:** Click the **install icon** (a monitor with a downward arrow) on the right side of the address bar, then click **Install**.
+* **Safari (Mac):** Click **File > Add to Dock...** in the top menu bar, then click **Add**.
+
+*(Note: After installing, open the app once while connected to the internet so it can cache core files for offline cockpit use.)*
 
 ## What it does
 
@@ -18,24 +38,6 @@ A free flight-planning app for US pilots. It runs in the browser and installs on
 | More | Aircraft profiles, offline chart downloads, track logs with GPX export. |
 
 Not included: flight plan filing, NOTAM text, live traffic, synthetic vision, 3D view, geo-referenced plates, takeoff and landing performance, climb and descent modeling. Coverage is the United States only.
-
-## Put it on GitHub
-
-There is no build step. The repository is the app.
-
-1. Create a repository and upload every file and folder in this directory.
-2. In the repository, open **Settings > Pages**, set the source to the `main` branch and the root folder, and save.
-3. Open the address GitHub shows. Install it from there:
-   - iPad and iPhone: in Safari, select Share, then Add to Home Screen.
-   - Mac and Windows: in Chrome or Edge, select the install icon in the address bar.
-
-To run it on your own computer instead:
-
-```bash
-python3 -m http.server 8765
-```
-
-Then open `http://localhost:8765`.
 
 ## Keep the data current
 
