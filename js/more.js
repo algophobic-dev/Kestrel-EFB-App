@@ -1,0 +1,122 @@
+// More tab: Aircraft, Downloads (offline charts), Track logs, About.
+import { h, kv, on, emit, toast, split, backBtn, uid, confirmDel, modal, download } from './util.js';
+import { aircraft } from './route.js';
+import { part } from './db.js';
+import { BASES, CHARTS, mapView, showTrack } from './map.js';
+import { fmtDur } from './geo.js';
+
+const card = (title, ...kids) => h('div', { class: 'card' }, h('h3', {}, title), kids);
+const field = (label, input, cls) => h('label', { class: 'field ' + (cls || '') }, h('span', {}, label), input);
+const TILES = 'kestrel-tiles';
+
+function tileUrls(layer, b, z0, z1) {
+  const urls = [], lon2x = (lon, z) => Math.floor((lon + 180) / 360 * 2 ** z), lat2y = (lat, z) => { const r = lat * Math.PI / 180; return Math.floor((1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2 * 2 ** z); };
+  for (let z = z0; z <= z1; z++) {
+    const x0 = lon2x(b.getWest(), z), x1 = lon2x(b.getEast(), z), y0 = lat2y(b.getNorth(), z), y1 = lat2y(b.getSouth(), z);
+    for (let x = x0; x <= x1; x++) for (let y = y0; y <= y1; y++) urls.push(layer.url.replace('{z}', z).replace('{x}', x).replace('{y}', y));
+  }
+  return urls;
+}
+
+export const More = {
+  init(view) {
+    this.detail = h('div', { class: 'pane-detail' });
+    const items = [['Aircraft', () => this.aircraft()], ['Downloads', () => this.downloads()], ['Track logs', () => this.tracks()], ['About', () => this.about()]];
+    this.list = h('div', { class: 'list' }, items.map(([n, fn]) => h('button', { class: 'row', onclick: e => { this.list.querySelectorAll('.sel').forEach(x => x.classList.remove('sel')); e.currentTarget.classList.add('sel'); this.sp.showDetail(); fn(); } }, h('div', { class: 'grow' }, h('div', { class: 't', style: 'font-weight:600' }, n)))));
+    this.sp = split(view, h('div', { class: 'pane-list' }, h('div', { class: 'pane-head' }, h('h2', {}, 'More')), this.list), this.detail);
+    on('tracks', () => this.section === 'tracks' && this.tracks());
+    this.about();
+  },
+  head(title, ...acts) { return h('div', { class: 'hero' }, backBtn(() => this.sp.showList()), h('h1', {}, title), h('div', { class: 'acts' }, acts)); },
+
+  // ----- Aircraft
+  aircraft() {
+    this.section = 'aircraft';
+    const l = aircraft.list();
+    this.detail.replaceChildren(h('div', { class: 'pad' }, this.head('Aircraft', h('button', { class: 'btn sm primary', onclick: () => this.editAc({ name: '', tail: '', tas: 110, burn: 8, fuelCap: 40, wb: { emptyW: 1500, emptyArm: 39, maxW: 2300, cgFwd: 35, cgAft: 47, fuelArm: 48, stations: [{ name: 'Front seats', arm: 37 }, { name: 'Rear seats', arm: 73 }, { name: 'Baggage', arm: 95 }] } }) }, 'New aircraft')),
+      h('div', { class: 'cards' }, l.map(a => card(a.tail || 'Aircraft', h('div', { style: 'font-weight:700;font-size:16px;margin-bottom:4px' }, a.name),
+        h('div', { class: 'note' }, `${a.tas} kt · ${a.burn} gph · ${a.fuelCap} gal usable`),
+        h('div', { class: 'bar', style: 'margin-top:8px' }, h('button', { class: 'btn sm', onclick: () => this.editAc(a) }, 'Edit'),
+          l.length > 1 && h('button', { class: 'btn sm danger', onclick: () => confirmDel(a.name, () => { aircraft.remove(a.id); this.aircraft(); }) }, 'Delete'))))),
+      h('p', { class: 'note' }, 'Enter speeds, fuel burn and weight and balance data from your aircraft’s POH. The sample values are placeholders.')));
+  },
+  editAc(a) {
+    const d = JSON.parse(JSON.stringify(a)), w = d.wb ||= { stations: [] };
+    const num = (o, k) => h('input', { type: 'number', step: 'any', min: 0, value: o[k] ?? '', oninput: e => o[k] = +e.target.value });
+    const txt = (o, k, ph) => h('input', { type: 'text', value: o[k] ?? '', placeholder: ph, oninput: e => o[k] = e.target.value });
+    const stations = h('textarea', { rows: 4, value: w.stations.map(s => `${s.name}, ${s.arm}`).join('\n') });
+    modal(a.id ? 'Edit aircraft' : 'New aircraft', h('div', { class: 'form' },
+      field('Type', txt(d, 'name', 'C172S')), field('Tail number', txt(d, 'tail', 'N12345')), field('Cruise TAS (kt)', num(d, 'tas')), field('Fuel burn (gph)', num(d, 'burn')), field('Usable fuel (gal)', num(d, 'fuelCap')),
+      field('Empty weight (lb)', num(w, 'emptyW')), field('Empty arm (in)', num(w, 'emptyArm')), field('Max weight (lb)', num(w, 'maxW')), field('Forward CG limit (in)', num(w, 'cgFwd')), field('Aft CG limit (in)', num(w, 'cgAft')), field('Fuel arm (in)', num(w, 'fuelArm')),
+      field('Loading stations. One per line: name, arm in inches.', stations, 'wide')), [{ label: 'Save', run: () => {
+        if (!d.name.trim() || !(d.tas > 0) || !(d.burn > 0)) { toast('Enter a type, cruise speed and fuel burn.'); return false; }
+        w.stations = stations.value.split('\n').map(s => s.split(',')).filter(p => p[0]?.trim() && isFinite(+p[1])).map(p => ({ name: p[0].trim(), arm: +p[1] }));
+        if (d.id === 'sample') d.id = uid();
+        aircraft.save(d); this.aircraft();
+      } }]);
+  },
+
+  // ----- Downloads
+  async downloads() {
+    this.section = 'downloads';
+    const layers = Object.fromEntries(Object.entries({ ...CHARTS, ...BASES }).filter(([, c]) => c.url && !c.online));
+    const v = mapView(), sel = h('select', {}, Object.entries(layers).map(([k, l]) => h('option', { value: k, selected: k === (v.chart !== 'none' ? v.chart : layers[v.base] ? v.base : 'topo') }, l.name)));
+    const zsel = h('select', {}), est = h('div', { class: 'note' }), prog = h('progress', { max: 1, value: 0, class: 'hidden' }), go = h('button', { class: 'btn primary' }, 'Download');
+    // Always start at the layer's lowest zoom so the area stays visible when zoomed out offline.
+    const range = () => { const l = layers[sel.value]; return [l.min, l.max]; };
+    const fillZ = () => { const l = layers[sel.value], a = Math.max(l.min, Math.min(l.max, Math.floor(v.zoom))), b = l.max; zsel.replaceChildren(...Array.from({ length: Math.min(b, a + 4) - a + 1 }, (_, i) => h('option', { value: a + i, selected: a + i === Math.min(b, a + 1) }, `Up to zoom ${a + i}${a + i === b ? ' (full detail)' : ''}`))); calc(); };
+    let urls = [];
+    const calc = () => { urls = tileUrls(layers[sel.value], v.bounds, range()[0], +zsel.value); est.textContent = urls.length > 6000 ? `${urls.length.toLocaleString()} tiles is too many. Zoom the map in or choose a lower zoom.` : `${urls.length.toLocaleString()} tiles, about ${(urls.length * .04).toFixed(urls.length < 250 ? 1 : 0)} MB.`; go.disabled = urls.length > 6000 || !urls.length; };
+    sel.onchange = fillZ; zsel.onchange = calc; fillZ();
+    go.onclick = async () => {
+      go.disabled = true; prog.classList.remove('hidden'); prog.max = urls.length;
+      const c = await caches.open(TILES); let ok = 0, done = 0; const q = [...urls];
+      await Promise.all(Array.from({ length: 6 }, async () => { while (q.length) { const u = q.shift(); try { if (!(await c.match(u))) { const r = await fetch(u, { mode: 'cors' }); if (r.ok) { await c.put(u, r); ok++; } } else ok++; } catch { } prog.value = ++done; } }));
+      const b = v.bounds;
+      kv.set('packs', [{ id: uid(), layer: sel.value, name: layers[sel.value].name, z0: range()[0], z1: +zsel.value, box: [b.getSouth(), b.getWest(), b.getNorth(), b.getEast()], n: ok, made: Date.now() }, ...kv.get('packs', [])]);
+      toast(ok === urls.length ? 'Download complete. These charts now work offline.' : `${ok} of ${urls.length} tiles saved. Some areas have no chart coverage.`);
+      this.downloads();
+    };
+    const packs = kv.get('packs', []), pl = await part('plates'), meta = await part('meta');
+    const usage = navigator.storage?.estimate ? await navigator.storage.estimate().catch(() => null) : null;
+    const persist = async () => { const ok = await navigator.storage?.persist?.(); toast(ok ? 'Storage is protected from automatic cleanup.' : 'The browser declined. Install the app to protect storage.'); };
+    this.detail.replaceChildren(h('div', { class: 'pad' }, this.head('Downloads'),
+      h('div', { class: 'cards' },
+        card('Download charts for the current map view', h('div', { class: 'form', style: 'margin-bottom:8px' }, field('Layer', sel), field('Detail', zsel)), est, prog,
+          h('div', { class: 'bar', style: 'margin-top:8px' }, go), h('p', { class: 'note' }, 'Position the Maps tab over the area you want first. Tiles are stored on this device only. The Dark and Light base maps work online only.')),
+        card('Saved chart areas', packs.length ? packs.map(p => h('div', { class: 'kv' }, h('span', { style: 'color:inherit' }, `${p.name} · ${p.n.toLocaleString()} tiles · ${new Date(p.made).toLocaleDateString()}`),
+          h('button', { class: 'btn sm danger', onclick: () => confirmDel('this chart area', async () => { const c = await caches.open(TILES), L = { getSouth: () => p.box[0], getWest: () => p.box[1], getNorth: () => p.box[2], getEast: () => p.box[3] }; for (const u of tileUrls(layers[p.layer], L, p.z0, p.z1)) await c.delete(u); kv.set('packs', kv.get('packs', []).filter(x => x.id !== p.id)); this.downloads(); }) }, 'Delete')))
+          : h('div', { class: 'note' }, 'No chart areas saved yet.')),
+        card('On this device', h('div', { class: 'kv' }, h('span', {}, 'Navigation data built'), h('span', {}, meta.built ? new Date(meta.built).toLocaleDateString() : 'Unknown')),
+          h('div', { class: 'kv' }, h('span', {}, 'Plates cycle'), h('span', {}, pl.cycle ? `${pl.cycle}, valid to ${pl.to.split(/\s+/).pop()}` : 'Unknown')),
+          usage && h('div', { class: 'kv' }, h('span', {}, 'Storage used'), h('span', {}, `${(usage.usage / 1048576).toFixed(0)} MB`)),
+          h('div', { class: 'bar', style: 'margin-top:8px' }, h('button', { class: 'btn sm', onclick: persist }, 'Protect storage')),
+          h('p', { class: 'note' }, 'Plates are saved per airport from the Plates tab. Weather, radar and airspace need a connection.')))));
+  },
+
+  // ----- Track logs
+  tracks() {
+    this.section = 'tracks';
+    const l = kv.get('tracks', []);
+    const gpx = t => `<?xml version="1.0"?>\n<gpx version="1.1" creator="Kestrel EFB" xmlns="http://www.topografix.com/GPX/1/1"><trk><name>${new Date(t.start).toISOString()}</name><trkseg>\n${t.pts.map(p => `<trkpt lat="${p[0]}" lon="${p[1]}"><ele>${(p[2] / 3.28084).toFixed(0)}</ele><time>${new Date(p[4]).toISOString()}</time></trkpt>`).join('\n')}\n</trkseg></trk></gpx>`;
+    this.detail.replaceChildren(h('div', { class: 'pad' }, this.head('Track logs'),
+      l.length ? h('div', { class: 'cards' }, l.map(t => card(new Date(t.start).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }),
+        h('div', { style: 'font-weight:700;font-size:16px' }, `${t.nm} nm · ${fmtDur((t.end - t.start) / 6e4)}`),
+        h('div', { class: 'bar', style: 'margin-top:8px' },
+          h('button', { class: 'btn sm', onclick: () => { emit('tab', 'maps'); setTimeout(() => showTrack(t), 50); } }, 'Show on map'),
+          h('button', { class: 'btn sm', onclick: () => download(`track-${new Date(t.start).toISOString().slice(0, 10)}.gpx`, gpx(t), 'application/gpx+xml') }, 'Export GPX'),
+          h('button', { class: 'btn sm danger', onclick: () => confirmDel('this track log', () => { kv.set('tracks', kv.get('tracks', []).filter(x => x.id !== t.id)); this.tracks(); }) }, 'Delete')))))
+        : h('div', { class: 'empty' }, 'No track logs. On the Maps tab, select REC to record your flight.')));
+  },
+
+  // ----- About
+  about() {
+    this.section = 'about';
+    this.detail.replaceChildren(h('div', { class: 'pad' }, this.head('About Kestrel EFB'),
+      h('div', { class: 'cards' },
+        card('Planning only', h('p', { style: 'margin:0' }, 'Kestrel EFB is not approved for navigation. Data may be out of date or wrong. Check every route, chart, weather report and NOTAM against official sources before you fly.')),
+        card('Data sources', ...[['Charts, airspace, fixes, airways, plates', 'FAA'], ['Airports, runways, frequencies, navaids', 'OurAirports'], ['METAR, TAF, SIGMET', 'National Weather Service'], ['Radar', 'Iowa Environmental Mesonet'], ['Winds aloft, terrain', 'Open-Meteo'], ['Base maps', 'CARTO, OpenStreetMap, USGS']].map(([k, s]) => h('div', { class: 'kv' }, h('span', {}, k), h('span', {}, s)))),
+        card('Not included', h('p', { class: 'note', style: 'margin:0' }, 'Flight plan filing, NOTAM text, live traffic, synthetic vision, 3D view, geo-referenced plates, takeoff and landing performance, and climb or descent modeling are not available in this version. Coverage is the United States only.')),
+        card('Install', h('p', { class: 'note', style: 'margin:0' }, 'iPad and iPhone: in Safari, select Share, then Add to Home Screen. Mac and Windows: in Chrome or Edge, select the install icon in the address bar.')))));
+  },
+};

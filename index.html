@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<title>Kestrel EFB</title>
+<meta name="theme-color" content="#10161a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
+<link rel="stylesheet" href="vendor/leaflet.css">
+<link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <g id="i-airports"><circle cx="12" cy="12" r="8"/><path d="M12 6v12M8.5 9.5h7"/></g>
+    <g id="i-maps"><path d="M3 6l6-2 6 2 6-2v14l-6 2-6-2-6 2zM9 4v14M15 6v14"/></g>
+    <g id="i-plates"><rect x="5" y="3" width="14" height="18" rx="1.5"/><path d="M8 8h8M8 12h8M8 16h5"/></g>
+    <g id="i-documents"><path d="M4 5h7v14H4zM13 5h7v14h-7z"/><path d="M6.5 9h2M6.5 12h2M15.5 9h2M15.5 12h2"/></g>
+    <g id="i-imagery"><rect x="3" y="5" width="18" height="14" rx="1.5"/><path d="M3 16l5-5 4 4 3-3 6 5"/></g>
+    <g id="i-flights"><path d="M3 18h18M5 14l14-5-2-2-5 1-4-3-2 1 3 3-4 1-1.5-1.5L2 9z"/></g>
+    <g id="i-scratch"><path d="M4 20l1-5L16 4l4 4L9 19zM14 6l4 4"/></g>
+    <g id="i-checklist"><path d="M4 12l5 5L20 6"/></g>
+    <g id="i-logbook"><path d="M12 6c-2-1.5-5-2-8-1.5v13c3-.5 6 0 8 1.5 2-1.500 5-2 8-1.500v-13c-3-.5-6 0-8 1.500zM12 6v13"/></g>
+    <g id="i-more"><path d="M4 7h16M4 12h16M4 17h16"/></g>
+    <g id="i-layers"><path d="M12 4l9 5-9 5-9-5zM3 14l9 5 9-5"/></g>
+    <g id="i-gear"><circle cx="12" cy="12" r="3"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.600 5.600l2.100 2.100M16.300 16.300l2.100 2.100M5.600 18.400l2.100-2.100M16.300 7.700l2.100-2.100"/></g>
+    <g id="i-target"><circle cx="12" cy="12" r="6"/><path d="M12 2v5M12 17v5M2 12h5M17 12h5"/></g>
+    <g id="i-search"><circle cx="10.500" cy="10.500" r="6"/><path d="M15 15l5 5"/></g>
+    <g id="i-swap"><path d="M4 9h14l-3-3M20 15H6l3 3"/></g>
+    <g id="i-star"><path d="M12 4l2.500 5 5.500.800-4 3.900.900 5.500-4.900-2.600-4.900 2.600.900-5.500-4-3.900 5.500-.800z"/></g>
+    <g id="i-plus"><path d="M12 5v14M5 12h14"/></g>
+    <g id="i-minus"><path d="M5 12h14"/></g>
+    <g id="i-play"><path d="M8 5l11 7-11 7z"/></g>
+    <g id="i-pause"><path d="M8 5v14M16 5v14"/></g>
+    <g id="i-back"><path d="M14 5l-7 7 7 7"/></g>
+    <g id="i-close"><path d="M6 6l12 12M18 6L6 18"/></g>
+    <g id="i-trash"><path d="M5 7h14M9 7V4h6v3M7 7l1 13h8l1-13"/></g>
+    <g id="i-print"><path d="M7 8V4h10v4M7 17H4V9h16v8h-3M7 14h10v6H7z"/></g>
+    <g id="i-speak"><path d="M4 10v4h4l5 4V6L8 10zM16 9c1.500 1.500 1.500 4.500 0 6M18.500 6.500c3 3 3 8 0 11"/></g>
+  </defs>
+</svg>
+
+<div id="app">
+  <main id="views">
+    <section id="v-maps" class="view active">
+      <header class="toolbar">
+        <button class="btn" id="btn-layers" title="Map layers"><svg class="ic"><use href="#i-layers"/></svg><span id="layer-label">Aeronautical</span></button>
+        <button class="btn sq" id="btn-fpl" title="Show or hide the flight plan">FPL</button>
+        <div class="search"><svg class="ic"><use href="#i-search"/></svg><input id="map-search" type="search" placeholder="Search or enter route" autocomplete="off" autocapitalize="characters" spellcheck="false"><div id="search-results" class="popover hidden"></div></div>
+        <button class="btn sq" id="btn-center" title="Center on route"><svg class="ic"><use href="#i-target"/></svg></button>
+      </header>
+
+      <div id="fpl" class="fpl hidden">
+        <div class="fpl-top">
+          <div class="fpl-side">
+            <select id="fpl-ac" title="Aircraft"></select>
+            <label class="field"><span>Altitude</span><input id="fpl-alt" type="number" step="500" min="0" inputmode="numeric"></label>
+            <label class="field"><span>Departs</span><input id="fpl-etd" type="time"></label>
+          </div>
+          <div class="fpl-route">
+            <div id="fpl-chips" class="chips"></div>
+            <div class="fpl-actions">
+              <button class="btn sm" id="fpl-reverse" title="Reverse route"><svg class="ic"><use href="#i-swap"/></svg></button>
+              <button class="btn sm" id="fpl-save" title="Save to Flights"><svg class="ic"><use href="#i-star"/></svg></button>
+              <button class="btn sm" id="fpl-clear">Clear</button>
+            </div>
+          </div>
+        </div>
+        <div class="fpl-stats">
+          <div class="stats" id="fpl-stats"></div>
+          <div class="seg" id="fpl-mode">
+            <button data-m="edit" class="on">Edit</button><button data-m="navlog">NavLog</button><button data-m="profile">Profile</button>
+          </div>
+        </div>
+        <div id="fpl-navlog" class="fpl-pane hidden"></div>
+        <div id="fpl-profile" class="fpl-pane hidden"><canvas id="profile-canvas"></canvas><div id="profile-info" class="profile-info"></div></div>
+      </div>
+
+      <div class="map-wrap">
+        <div id="map"></div>
+        <div class="map-time" id="map-clock"></div>
+        <div class="map-tools">
+          <button id="tool-follow" title="Follow my position"><svg class="ic"><use href="#i-target"/></svg></button>
+          <button id="tool-rec" title="Record track log">REC</button>
+          <div id="tool-timer" class="timer">00:00</div>
+          <button id="tool-zin" title="Zoom in"><svg class="ic"><use href="#i-plus"/></svg></button>
+          <button id="tool-zout" title="Zoom out"><svg class="ic"><use href="#i-minus"/></svg></button>
+        </div>
+        <div class="timebar hidden" id="timebar">
+          <button id="radar-play" title="Play radar loop"><svg class="ic"><use href="#i-play"/></svg></button>
+          <div class="tb-label" id="radar-label"></div>
+          <input id="radar-slider" type="range" min="0" max="10" step="1" value="10">
+        </div>
+        <aside id="inspector" class="inspector hidden"></aside>
+        <div id="layers-pop" class="popover layers hidden"></div>
+      </div>
+    </section>
+    <section id="v-airports" class="view"></section>
+    <section id="v-plates" class="view"></section>
+    <section id="v-documents" class="view"></section>
+    <section id="v-imagery" class="view"></section>
+    <section id="v-flights" class="view"></section>
+    <section id="v-scratch" class="view"></section>
+    <section id="v-checklist" class="view"></section>
+    <section id="v-logbook" class="view"></section>
+    <section id="v-more" class="view"></section>
+  </main>
+  <nav id="tabs"></nav>
+</div>
+<div id="modal" class="modal hidden"></div>
+<div id="toast" class="toast hidden"></div>
+<script src="vendor/leaflet.js"></script>
+<script type="module" src="js/app.js"></script>
+</body>
+</html>

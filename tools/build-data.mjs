@@ -1,0 +1,167 @@
+#!/usr/bin/env node
+// Rebuilds everything in /data from free public sources. No API keys.
+// Run every 28 days (FAA cycle):  node tools/build-data.mjs
+// Rebuild one part only:          node tools/build-data.mjs --only=airports   (airports | fixes | airways | plates)
+import { writeFile, mkdir } from 'node:fs/promises';
+import { gunzipSync } from 'node:zlib';
+import { fileURLToPath } from 'node:url';
+import path from 'node:path';
+
+const OUT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'data');
+const OA = 'https://davidmegginson.github.io/ourairports-data/';
+const FAA = 'https://services6.arcgis.com/ssFJjBXIUyZDrSYZ/arcgis/rest/services/';
+const COUNTRIES = new Set(['US', 'PR', 'VI', 'GU', 'AS', 'MP']);
+const r5 = n => Math.round(n * 1e5) / 1e5;
+const r4 = n => Math.round(n * 1e4) / 1e4;
+const ONLY = (process.argv.find(a => a.startsWith('--only=')) || '').slice(7).split(',').filter(Boolean);
+const want = n => !ONLY.length || ONLY.includes(n);
+
+async function get(url, as = 'text', tries = 4) {
+  for (let i = 0; ; i++) {
+    try {
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(res.status + ' ' + url);
+      return as === 'json' ? await res.json() : as === 'buf' ? Buffer.from(await res.arrayBuffer()) : await res.text();
+    } catch (e) {
+      if (i >= tries) throw e;
+      await new Promise(r => setTimeout(r, 1500 * (i + 1)));
+    }
+  }
+}
+
+function csv(text) {
+  const rows = []; let row = [], cur = '', q = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (q) {
+      if (c === '"') { if (text[i + 1] === '"') { cur += '"'; i++; } else q = false; }
+      else cur += c;
+    } else if (c === '"') q = true;
+    else if (c === ',') { row.push(cur); cur = ''; }
+    else if (c === '\n') { row.push(cur); rows.push(row); row = []; cur = ''; }
+    else if (c !== '\r') cur += c;
+  }
+  if (cur || row.length) { row.push(cur); rows.push(row); }
+  const head = rows.shift();
+  return rows.map(r => Object.fromEntries(head.map((h, i) => [h, r[i] ?? ''])));
+}
+
+async function save(name, obj) {
+  const s = JSON.stringify(obj);
+  await writeFile(path.join(OUT, name), s);
+  console.log(name.padEnd(16), (s.length / 1024).toFixed(0) + ' KB');
+}
+
+async function pages(service, fields, count, extra = '') {
+  const out = [];
+  const offs = []; for (let o = 0; o < count; o += 2000) offs.push(o);
+  for (let i = 0; i < offs.length; i += 6) {
+    const got = await Promise.all(offs.slice(i, i + 6).map(o =>
+      get(`${FAA}${service}/FeatureServer/0/query?where=1%3D1&outFields=${fields}&outSR=4326&orderByFields=OBJECTID&resultOffset=${o}&resultRecordCount=2000${extra}&f=json`, 'json')));
+    for (const g of got) out.push(...(g.features || []));
+    process.stdout.write(`\r${service} ${out.length}/${count}   `);
+  }
+  process.stdout.write('\n');
+  return out;
+}
+const countOf = async s => (await get(`${FAA}${s}/FeatureServer/0/query?where=1%3D1&returnCountOnly=true&f=json`, 'json')).count;
+const inUS = (lat, lon) => lat > 13 && lat < 72.5 && (lon < -64 || lon > 144);
+
+await mkdir(OUT, { recursive: true });
+
+// ---- Airports, runways, frequencies, navaids (OurAirports, public domain)
+const wxSites = {};
+try {
+  const st = JSON.parse(gunzipSync(await get('https://aviationweather.gov/data/cache/stations.cache.json.gz', 'buf')).toString());
+  for (const s of st) if (s.icaoId) wxSites[s.icaoId] = (s.siteType || []).includes('TAF') ? 2 : (s.siteType || []).includes('METAR') ? 1 : 0;
+} catch (e) { console.warn('weather station list failed:', e.message); }
+
+const TYPES = { small_airport: 0, medium_airport: 1, large_airport: 2, seaplane_base: 3, heliport: 4 };
+const apRows = csv(await get(OA + 'airports.csv')).filter(a => COUNTRIES.has(a.iso_country) && a.type in TYPES);
+const idOf = {};          // OurAirports ident -> our id
+const airports = apRows.map(a => {
+  // Pilots know an airport by its ICAO code, or by its FAA identifier when it has no ICAO code.
+  const id = a.icao_code || a.local_code || a.gps_code || a.ident;
+  idOf[a.ident] = id;
+  // Weather stations are keyed by ICAO-style ids (K + FAA identifier for most of the lower 48).
+  const station = [a.icao_code, a.gps_code, a.local_code && 'K' + a.local_code].find(s => s && wxSites[s]);
+  return [id, a.name, r5(+a.latitude_deg), r5(+a.longitude_deg), Math.round(+a.elevation_ft || 0), TYPES[a.type],
+    a.municipality, a.iso_region.split('-')[1] || '', a.local_code && a.local_code !== id ? a.local_code : '',
+    station ? wxSites[station] : 0, station && station !== id ? station : ''];
+});
+await save('airports.json', airports);
+
+const runways = {};
+for (const r of csv(await get(OA + 'runways.csv'))) {
+  const id = idOf[r.airport_ident]; if (!id || r.closed === '1') continue;
+  (runways[id] ||= []).push([r.le_ident, r.he_ident, +r.length_ft || 0, +r.width_ft || 0, r.surface, +r.lighted,
+    r.le_latitude_deg ? r5(+r.le_latitude_deg) : null, r.le_longitude_deg ? r5(+r.le_longitude_deg) : null,
+    r.he_latitude_deg ? r5(+r.he_latitude_deg) : null, r.he_longitude_deg ? r5(+r.he_longitude_deg) : null,
+    +r.le_heading_degT || null, +r.le_elevation_ft || null, +r.he_elevation_ft || null]);
+}
+await save('runways.json', runways);
+
+const freqs = {};
+for (const f of csv(await get(OA + 'airport-frequencies.csv'))) {
+  const id = idOf[f.airport_ident]; if (!id) continue;
+  (freqs[id] ||= []).push([f.type, f.description, +f.frequency_mhz]);
+}
+await save('freqs.json', freqs);
+
+const navaids = csv(await get(OA + 'navaids.csv')).filter(n => COUNTRIES.has(n.iso_country))
+  .map(n => [n.ident, n.name, n.type, r5(+n.latitude_deg), r5(+n.longitude_deg), +n.frequency_khz, +n.magnetic_variation_deg || 0]);
+await save('navaids.json', navaids);
+
+// ---- Fixes and airways (FAA)
+if (want('fixes')) try {
+  const fx = await pages('DesignatedPoint', 'IDENT_TXT', await countOf('DesignatedPoint'));
+  const seen = new Set(), fixes = [];
+  for (const f of fx) {
+    const id = f.attributes.IDENT_TXT, g = f.geometry;
+    if (!g || !/^[A-Z]{5}$/.test(id || '') || !inUS(g.y, g.x)) continue;
+    const k = id + Math.round(g.y) + Math.round(g.x); if (seen.has(k)) continue; seen.add(k);
+    fixes.push([id, r5(g.y), r5(g.x)]);
+  }
+  await save('fixes.json', fixes);
+} catch (e) { console.warn('fixes failed:', e.message); }
+
+if (want('airways')) try {
+  const seg = await pages('ATSRoute', 'IDENT_TXT', await countOf('ATSRoute'));
+  const airways = {};
+  for (const s of seg) {
+    const id = s.attributes.IDENT_TXT, p = s.geometry?.paths?.[0];
+    if (!id || !p || p.length < 2) continue;
+    const a = p[0], b = p[p.length - 1];
+    if (!inUS(a[1], a[0]) && !inUS(b[1], b[0])) continue;
+    (airways[id] ||= []).push([r4(a[1]), r4(a[0]), r4(b[1]), r4(b[0])]);
+  }
+  await save('airways.json', airways);
+} catch (e) { console.warn('airways failed:', e.message); }
+
+// ---- Terminal procedures index (FAA d-TPP)
+if (want('plates')) try {
+  const base = Date.UTC(2025, 0, 23), day = 864e5;
+  const n = Math.floor((Date.now() - base) / (28 * day));
+  let xml, cycle;
+  for (const k of [n, n - 1]) {
+    const d = new Date(base + k * 28 * day);
+    const y = d.getUTCFullYear();
+    const inYear = Math.floor((d - Date.UTC(y, 0, 1)) / (28 * day)) + 1;
+    cycle = String(y).slice(2) + String(inYear).padStart(2, '0');
+    try { xml = await get(`https://aeronav.faa.gov/d-tpp/${cycle}/xml_data/d-tpp_Metafile.xml`, 'text', 1); break; } catch { }
+  }
+  if (!xml) throw new Error('no metafile');
+  const hdr = xml.match(/<digital_tpp cycle="(\d+)" from_edate="([^"]+)" to_edate="([^"]+)"/);
+  const a = {};
+  for (const m of xml.matchAll(/<airport_name ID="[^"]*"[^>]*apt_ident="([^"]*)" icao_ident="([^"]*)"[^>]*>([\s\S]*?)<\/airport_name>/g)) {
+    const list = [];
+    for (const r of m[3].matchAll(/<chart_code>([^<]*)<\/chart_code>\s*<chart_name>([^<]*)<\/chart_name>[\s\S]*?<pdf_name>([^<]*)<\/pdf_name>/g))
+      if (r[3] && !/DELETED/i.test(r[3])) list.push([r[1], r[2].replace(/&amp;/g, '&'), r[3]]);
+    if (list.length) { a[m[2] || m[1]] = list; if (m[2] && m[1]) a[m[1]] ||= list; }
+  }
+  // de-duplicate the FAA-ident alias to keep the file small
+  for (const k of Object.keys(a)) if (k.length === 3 && a['K' + k] === a[k]) delete a[k];
+  await save('plates.json', { cycle: hdr[1], from: hdr[2], to: hdr[3], a });
+} catch (e) { console.warn('plates failed:', e.message); }
+
+await save('meta.json', { built: new Date().toISOString() });
