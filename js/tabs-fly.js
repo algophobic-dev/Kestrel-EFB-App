@@ -5,6 +5,7 @@ import { along, fmtDur } from './geo.js';
 import { winds } from './wx.js';
 import { navlogTable } from './fpl.js';
 import { fitRoute } from './map.js';
+import { perfPanel } from './perf.js';
 
 const card = (title, ...kids) => h('div', { class: 'card' }, h('h3', {}, title), kids);
 const kvRow = (k, v, cls) => h('div', { class: 'kv' }, h('span', {}, k), h('span', { class: cls || '' }, v));
@@ -33,7 +34,8 @@ export const Flights = {
     const f = flights.list().find(x => x.id === id); if (!f) return;
     this.cur = id; this.fill(); this.sp.showDetail();
     const ac = aircraft.get(f.acId), nav = h('div', {}, h('div', { class: 'empty' }, 'Calculating NavLog.')), sum = h('div', {}, 'Calculating');
-    const wbOut = h('div', {});
+    const wbOut = h('div', {}), perfBox = h('div', {}, h('div', { class: 'note' }, 'Calculating.'));
+    let tow = null, trip = 0, panels = [];
     f.loads ||= { fuel: ac.fuelCap, st: {} };
     const wb = ac.wb, calcWB = () => {
       if (!wb) return wbOut.replaceChildren(h('div', { class: 'note' }, 'This aircraft has no weight and balance data. Add it in More > Aircraft.'));
@@ -41,6 +43,7 @@ export const Flights = {
       for (const s of wb.stations) { const x = +f.loads.st[s.name] || 0; w += x; m += x * s.arm; }
       const fw = (+f.loads.fuel || 0) * 6; w += fw; m += fw * wb.fuelArm;
       const cg = m / w, okW = w <= wb.maxW, okCG = cg >= wb.cgFwd && cg <= wb.cgAft;
+      tow = w; panels.forEach(p => p.refresh());
       wbOut.replaceChildren(kvRow('Takeoff weight', `${Math.round(w).toLocaleString()} lb of ${wb.maxW.toLocaleString()}`, okW ? 'ok' : 'bad'), kvRow('Center of gravity', `${cg.toFixed(1)} in (limits ${wb.cgFwd}–${wb.cgAft})`, okCG ? 'ok' : 'bad'),
         kvRow('Result', okW && okCG ? 'Within limits' : !okW ? `Over by ${Math.round(w - wb.maxW)} lb. Remove weight.` : 'CG out of limits. Move weight.', okW && okCG ? 'ok' : 'bad'));
       flights.list().some(x => x.id === f.id) && kv.set('flights', flights.list().map(x => x.id === f.id ? f : x));
@@ -55,7 +58,8 @@ export const Flights = {
       h('div', { class: 'cards', style: 'margin-bottom:10px' },
         card('Summary', sum),
         card('Weight and balance', wb && h('div', { class: 'form', style: 'margin-bottom:8px' },
-          wb.stations.map(s => field(s.name + ' (lb)', num(() => f.loads.st[s.name], v => f.loads.st[s.name] = v))), field('Fuel (gal)', num(() => f.loads.fuel, v => f.loads.fuel = v))), wbOut)),
+          wb.stations.map(s => field(s.name + ' (lb)', num(() => f.loads.st[s.name], v => f.loads.st[s.name] = v))), field('Fuel (gal)', num(() => f.loads.fuel, v => f.loads.fuel = v))), wbOut),
+        card('Takeoff and landing', perfBox)),
       h('div', { class: 'card', style: 'padding:0;overflow:auto' }, nav)));
     calcWB();
     const { points, errors } = await parse(f.text);
@@ -63,6 +67,12 @@ export const Flights = {
     if (this.cur !== id) return;
     const r = legsFor(points, ac, f.alt, w);
     nav.replaceChildren(navlogTable(r));
+    trip = r.total ? r.total.fuel : 0;
+    const dep = points[0], arr = points[points.length - 1];
+    panels = await Promise.all([dep?.kind === 'apt' && perfPanel(dep, 'to', ac, () => tow), arr?.kind === 'apt' && arr !== dep && perfPanel(arr, 'ld', ac, () => tow ? tow - trip * 6 : null)].filter(Boolean));
+    if (this.cur !== id) return;
+    perfBox.replaceChildren(...(panels.length ? panels : [h('div', { class: 'note' }, 'Start and end the route at airports to see runway performance.')]),
+      h('div', { class: 'note' }, 'Estimates from your baseline distances and rule-of-thumb corrections. Use your POH for the real figures.'));
     sum.replaceChildren(...[kvRow('Route', f.text), kvRow('Distance', r.total ? r.total.d.toFixed(0) + ' nm' : '--'), kvRow('Time en route', r.total ? fmtDur(r.total.min) : '--'),
       kvRow('Trip fuel', r.total ? `${r.total.fuel.toFixed(1)} gal` : '--'),
       kvRow('Taxi + reserve', r.total ? `${r.total.taxi.toFixed(1)} + ${r.total.reserve.toFixed(1)} gal (${ac.reserve ?? 45} min)` : '--'),

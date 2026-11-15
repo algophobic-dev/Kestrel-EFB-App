@@ -8,16 +8,16 @@ A free flight-planning app for US pilots. It runs in the browser and installs on
 
 | Tab | Function |
 |---|---|
-| Maps | FAA VFR sectional, terminal, IFR low and high charts. Airports, navaids, fixes, Class B/C/D and special use airspace. Animated radar, flight category dots, SIGMETs, obstacles, terrain hazard coloring, live traffic (with the relay). Tap anywhere to add a point to the route or mark a position. GPS position and track log recording. |
-| Flight plan (FPL) | Type a route (`KLUK HYK V97 CVG KCVG`). Airways, SIDs and STARs expand to their fixes (`KAPA WNGSS1 CHNGY ...`), or pick them with the Procedure button. Climb and descent are modeled from the aircraft profile. NavLog with winds aloft, heading, time and fuel. Profile view of terrain and airspace along the route. |
+| Maps | FAA VFR sectional, terminal, IFR low and high charts. Airports, navaids, fixes, Class B/C/D and special use airspace. Animated radar, flight category dots, SIGMETs, obstacles, terrain hazard coloring, runway and taxiway charts when zoomed in, and with the relay live traffic and icing, turbulence and IFR advisories. Tap anywhere to add a point to the route or mark a position. GPS position and track log recording. |
+| Flight plan (FPL) | Type a route (`KLUK HYK V97 CVG KCVG`). Airways, SIDs, STARs and approaches expand to their fixes (`KAPA WNGSS1 CHNGY ...`), or pick them with the Procedure button. Climb and descent are modeled from the aircraft profile. The Routes button suggests airway routes. The 3D view flies the route over terrain. NavLog with winds aloft, heading, time and fuel. Profile view of terrain and airspace along the route. |
 | Airports | METAR, TAF, D-ATIS, runways with wind components, frequencies, NOTAMs (with the relay), a fuel price note and link. |
-| Plates | Current FAA approach plates, departures, arrivals and airport diagrams. Save an airport's plates for offline use. |
+| Plates | Current FAA approach plates, departures, arrivals and airport diagrams. Save an airport's plates for offline use. Show on map places an approach plate on the map (with the relay). |
 | Imagery | Prog charts, surface analysis, radar, satellite, icing, winds aloft. |
-| Flights | Saved flights, printable NavLog, weight and balance. |
+| Flights | Saved flights, printable NavLog, weight and balance, takeoff and landing distance estimates. |
 | ScratchPads, Checklist, Logbook, Documents | Handwritten notes with ATIS and CRAFT templates, checklists with speech, a logbook with CSV export, imported PDFs. |
 | More | Aircraft profiles, offline chart downloads, marked positions, imported map content (GeoJSON, KML), track logs with GPX export. |
 
-Not included: flight plan filing, synthetic vision, 3D view, geo-referenced plates, approach procedures by name, autorouting, takeoff and landing performance. Coverage is the United States only.
+Not included: flight plan filing. Coverage is the United States only.
 
 ## Put it on GitHub
 

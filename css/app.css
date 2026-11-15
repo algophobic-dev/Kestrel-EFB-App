@@ -255,3 +255,21 @@ progress { width: 100%; accent-color: var(--accent); }
 .tfc span { position: absolute; left: -9px; top: -9px; width: 18px; height: 18px; display: block; }
 .tfc svg { width: 18px; height: 18px; fill: #5fe0ff; stroke: #06212b; stroke-width: 1.2; }
 .tfc b { position: absolute; left: 11px; top: -11px; font-size: 10px; line-height: 1.15; font-weight: 700; white-space: nowrap; color: #c9f4ff; text-shadow: 0 0 2px #000, 0 0 2px #000, 0 0 3px #000; }
+
+/* Airport surface labels, 3D view */
+.surf { position: absolute; transform: translate(-50%, -50%); font-size: 10px; font-weight: 800; padding: 0 4px; border-radius: 3px; white-space: nowrap; pointer-events: none; }
+.surf.rwy { background: #fff; color: #111; font-size: 11px; }
+.surf.twy { background: #f2c81e; color: #111; }
+.surf.hot { background: #ef4444; color: #fff; }
+#fpl-3d { height: 300px; display: flex; flex-direction: column; overflow: hidden; }
+#v3d-canvas { flex: 1; min-height: 0; width: 100%; background: #0b1020; }
+.v3d-bar { display: flex; align-items: center; gap: 8px; padding: 5px 8px; flex: none; }
+.v3d-bar input[type=range] { flex: 1; min-width: 60px; accent-color: var(--accent); }
+.v3d-bar .note { width: 150px; flex: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+@media (max-width: 760px) { #fpl-3d { height: 240px; } .v3d-bar .note { width: 96px; } }
+
+/* Plate overlay bar */
+.plate-bar { position: absolute; top: 8px; left: 50%; transform: translateX(-50%); z-index: 650; max-width: calc(100% - 120px); display: flex; align-items: center; gap: 8px;
+  background: var(--panel); border-radius: 6px; padding: 4px 6px 4px 10px; box-shadow: 0 1px 6px rgba(0,0,0,.5); }
+.plate-bar .ttl { font-weight: 700; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.plate-bar input { width: 90px; flex: none; accent-color: var(--accent); }

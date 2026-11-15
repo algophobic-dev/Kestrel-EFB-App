@@ -1,10 +1,11 @@
 // Moving map: base maps, FAA charts, aeronautical overlay, airspace, radar, SIGMETs, ownship, inspector.
 import { $, h, icon, kv, files, on, emit, debounce, toast, esc, uid, modal } from './util.js';
 import { db, inBox, nearby, search, resolve, marks } from './db.js';
-import { along, dist, bearing, fmtLL, compass, norm } from './geo.js';
-import { metar, sigmets, elevations, traffic } from './wx.js';
+import { along, dist, bearing, fmtLL, compass, norm, inGeom } from './geo.js';
+import { metar, sigmets, elevations, traffic, gairmets } from './wx.js';
 import { plan, setPlan, addPoint, current } from './route.js';
 import { CONFIG } from './config.js';
+import { plateImage } from './plateov.js';
 
 const FAA_TILES = 'https://tiles.arcgis.com/tiles/ssFJjBXIUyZDrSYZ/arcgis/rest/services/';
 export const FAA_FEAT = 'https://services6.arcgis.com/ssFJjBXIUyZDrSYZ/arcgis/rest/services/';
@@ -25,29 +26,30 @@ export const CHARTS = {
   low: { name: 'IFR Low', url: FAA_TILES + 'IFR_AreaLow/MapServer/tile/{z}/{y}/{x}', min: 7, max: 12 },
   high: { name: 'IFR High', url: FAA_TILES + 'IFR_High/MapServer/tile/{z}/{y}/{x}', min: 5, max: 9 },
 };
-const OVERLAYS = { aero: 'Airports and navaids', airspace: 'Airspace', radar: 'Radar', cat: 'Flight category', sigmet: 'SIGMETs', hazard: 'Terrain hazard', obstacles: 'Obstacles', traffic: 'Traffic' };
+const OVERLAYS = { aero: 'Airports and navaids', airspace: 'Airspace', radar: 'Radar', cat: 'Flight category', sigmet: 'SIGMETs', ice: 'Icing advisories', turb: 'Turbulence advisories', ifr: 'IFR advisories', hazard: 'Terrain hazard', obstacles: 'Obstacles', traffic: 'Traffic' };
 const RADAR = o => `https://mesonet.agron.iastate.edu/cache/tile.py/1.0.0/nexrad-n0q-900913${o ? '-m' + String(o).padStart(2, '0') + 'm' : ''}/{z}/{x}/{y}.png`;
 
 const st = Object.assign({ base: 'dark', chart: 'none', ov: { aero: true, airspace: true, radar: false, cat: true, sigmet: false }, c: [39.1, -84.5], z: 8 }, kv.get('map', {}));
 const save = () => kv.set('map', st);
 export let map;
-let baseL, chartL, radarL, aeroL, routeL, airspaceL, sigmetL, ownL, canvas, hazardL, obsL, trafficL, marksL, contentL;
+let baseL, chartL, radarL, aeroL, routeL, airspaceL, sigmetL, ownL, canvas, hazardL, obsL, trafficL, marksL, contentL, advisL, surfL;
 const cats = new Map(), markers = new Map();
 
 export const altText = (v, uom, code) => code === 'SFC' || (v === 0 && code !== 'MSL') ? 'Surface' : v == null || v < 0 ? (code || 'Unknown') : uom === 'FL' ? 'FL' + v : `${Number(v).toLocaleString()}' ${code || 'MSL'}`;
 const mk = (p, cls, label) => L.marker([p.lat, p.lon], { interactive: false, keyboard: false, icon: L.divIcon({ className: '', iconSize: [0, 0], html: `<div class="mk ${cls}"><i></i><b>${esc(label ?? p.id)}</b></div>` }) });
 
 export function initMap() {
-  map = L.map('map', { zoomControl: false, attributionControl: true, minZoom: 3, maxZoom: 16, worldCopyJump: true, zoomSnap: .5 }).setView(st.c, st.z);
+  map = L.map('map', { zoomControl: false, attributionControl: true, minZoom: 3, maxZoom: 18, worldCopyJump: true, zoomSnap: .5 }).setView(st.c, st.z);
   map.attributionControl.setPrefix('Not for navigation');
   canvas = L.canvas({ padding: .3 });
   map.createPane('wx').style.zIndex = 350;
   airspaceL = L.layerGroup().addTo(map); sigmetL = L.layerGroup().addTo(map);
+  advisL = L.layerGroup().addTo(map); surfL = L.layerGroup().addTo(map);
   contentL = L.layerGroup().addTo(map); obsL = L.layerGroup().addTo(map);
   routeL = L.layerGroup().addTo(map); aeroL = L.layerGroup().addTo(map); marksL = L.layerGroup().addTo(map); trafficL = L.layerGroup().addTo(map);
   applyTiles(); applyOverlays();
 
-  map.on('moveend', () => { const c = map.getCenter(); st.c = [c.lat, c.lng]; st.z = map.getZoom(); save(); drawAero(); loadAirspace(); loadObstacles(); });
+  map.on('moveend', () => { const c = map.getCenter(); st.c = [c.lat, c.lng]; st.z = map.getZoom(); save(); drawAero(); loadAirspace(); loadObstacles(); loadSurface(); });
   map.on('click', e => inspect({ lat: e.latlng.lat, lon: e.latlng.lng }));
   map.on('dragstart', () => setFollow(false));
   new ResizeObserver(() => { if ($('#map').clientWidth) map.invalidateSize(); }).observe($('#map'));
@@ -68,9 +70,9 @@ function applyTiles() {
   baseL?.remove(); chartL?.remove();
   if (!BASES[st.base]) st.base = 'dark';
   const b = BASES[st.base];
-  baseL = L.tileLayer(b.url, { maxNativeZoom: b.max, maxZoom: 16, attribution: b.attr }).addTo(map);
+  baseL = L.tileLayer(b.url, { maxNativeZoom: b.max, maxZoom: 18, attribution: b.attr }).addTo(map);
   const c = CHARTS[st.chart];
-  chartL = c?.url ? L.tileLayer(c.url, { minNativeZoom: c.min, maxNativeZoom: c.max, minZoom: c.min - 1, maxZoom: 16, attribution: 'FAA charts' }).addTo(map) : null;
+  chartL = c?.url ? L.tileLayer(c.url, { minNativeZoom: c.min, maxNativeZoom: c.max, minZoom: c.min - 1, maxZoom: 18, attribution: 'FAA charts' }).addTo(map) : null;
   $('#layer-label').textContent = c?.url ? c.name : b.name + ' map';
 }
 function applyOverlays() {
@@ -81,7 +83,7 @@ function applyOverlays() {
   drawAero(); loadAirspace(); loadSigmets();
   hazardL?.remove(); hazardL = null; hazardAt = null;
   if (st.ov.hazard) { hazardL = new Hazard({ pane: 'wx', maxNativeZoom: 11, minZoom: 6, attribution: 'Terrain: Mapzen' }).addTo(map); hazardAt = hazardRef(); }
-  loadObstacles(); setTraffic();
+  loadObstacles(); setTraffic(); loadAdvisories(); loadSurface();
 }
 function drawLayersPop() {
   const radio = (group, key, label) => h('label', { class: 'row' }, h('input', { type: 'radio', name: group, checked: st[group] === key, onchange: () => { st[group] = key; save(); applyTiles(); } }), label);
@@ -283,7 +285,7 @@ export async function inspect(p, focus) {
       h('div', { class: 'sect' }, 'Location'),
       h('div', { class: 'row' }, h('div', { class: 'grow' }, h('div', { class: 't' }, fmtLL(p.lat, p.lon)), locSub), h('button', { class: 'pill', title: 'Save this spot as a named position', onclick: () => markAt(p) }, 'Mark'), h('button', { class: 'pill go', onclick: () => add({ kind: 'll', ...p }) }, 'Add')),
       h('div', { class: 'sect' }, 'Airspace'), asBox,
-      obsRows(p, rad),
+      obsRows(p, rad), advisRows(p),
       h('div', { class: 'sect' }, 'Nearby'),
       near.length ? near.map(rowFor) : h('div', { class: 'row' }, h('div', { class: 's' }, 'Nothing nearby. Zoom in to see fixes.'))));
   box.classList.remove('hidden');
@@ -417,4 +419,71 @@ async function drawContent() {
     L.geoJSON(gj, { renderer: canvas, interactive: false, style: { color: '#ffb020', weight: 2.5, fillOpacity: .12 },
       pointToLayer: (f, ll) => L.circleMarker(ll, { renderer: canvas, radius: 5, color: '#10161a', weight: 1, fillColor: '#ffb020', fillOpacity: 1, interactive: false }) }).addTo(contentL);
   }
+}
+
+// ---------- G-AIRMET advisories: icing, turbulence, IFR (through the relay)
+const ADV = { ICE: ['ice', '#4cc9f0', 'Icing'], 'TURB-HI': ['turb', '#ff9f1c', 'Turbulence, high'], 'TURB-LO': ['turb', '#ff9f1c', 'Turbulence, low'], IFR: ['ifr', '#b388ff', 'IFR'], MT_OBSC: ['ifr', '#b388ff', 'Mountain obscuration'] };
+let advis = [];
+async function loadAdvisories() {
+  advisL.clearLayers(); advis = [];
+  if (!st.ov.ice && !st.ov.turb && !st.ov.ifr) return;
+  const off = msg => { st.ov.ice = st.ov.turb = st.ov.ifr = false; save(); toast(msg); };
+  if (!CONFIG.proxyUrl) return off('Advisories need the relay server. See the README to set it up.');
+  let j; try { j = await gairmets(); } catch (e) { return off(e.message + '.'); }
+  const polys = (j.features || []).filter(f => f.geometry && /Polygon/.test(f.geometry.type) && ADV[f.properties.hazard]);
+  const first = Math.min(...polys.map(f => f.properties.forecast ?? 0));
+  advis = polys.filter(f => (f.properties.forecast ?? 0) === first && st.ov[ADV[f.properties.hazard][0]]);
+  advisL.clearLayers();
+  L.geoJSON({ type: 'FeatureCollection', features: advis }, { renderer: canvas, interactive: false, style: f => ({ color: ADV[f.properties.hazard][1], weight: 2, fillOpacity: .13, dashArray: f.properties.hazard === 'TURB-HI' ? '8 5' : null }) }).addTo(advisL);
+  if (!advis.length) toast('No active advisories of that kind.');
+}
+const lvl = v => !v ? '' : v === 'SFC' ? 'surface' : v === 'FZL' ? 'freezing level' : +v >= 180 ? 'FL' + v : `${(+v * 100).toLocaleString()}'`;
+function advisRows(p) {
+  const hit = advis.filter(f => inGeom(p.lon, p.lat, f.geometry));
+  if (!hit.length) return [];
+  return [h('div', { class: 'sect' }, 'Advisories'), ...hit.map(f => { const q = f.properties;
+    return h('div', { class: 'row' }, h('div', { class: 'grow' }, h('div', { class: 't' }, ADV[q.hazard][2] + (q.severity ? `, ${q.severity === 'MOD' ? 'moderate' : q.severity.toLowerCase()}` : '')),
+      h('div', { class: 's' }, [q.base || q.top ? `${lvl(q.base)} to ${lvl(q.top)}` : '', q.dueTo && q.dueTo !== q.hazard ? q.dueTo : '', `valid ${new Date(q.validTime).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`].filter(Boolean).join(' · ')))); })];
+}
+
+// ---------- airport surface: runway outlines everywhere, taxiways, aprons and hot spots where the FAA maps them
+let surfSeq = 0;
+const loadSurface = debounce(async () => {
+  if (!map) return;
+  const my = ++surfSeq, z = map.getZoom();
+  if (!st.ov.aero || z < 12.5) { surfL.clearLayers(); return; }
+  const env = envelope(map.getBounds().pad(.1));
+  const q = (svc, fields) => fetch(`${FAA_FEAT}${svc}/FeatureServer/0/query?where=1%3D1${env}&outFields=${fields}&outSR=4326&resultRecordCount=2000&f=geojson`).then(r => r.json()).then(j => j.features || []).catch(() => []);
+  const detail = z >= 13.5;
+  const [rw, tw, ap, hs] = await Promise.all([q('RunwayArea', 'DESIGNATOR_TXT'), detail ? q('AM_Taxiway', 'DESIGNATOR') : [], detail ? q('AM_Apron', 'DESIGNATOR') : [], detail ? q('AM_Hotspot', 'HOT_ID') : []]);
+  if (my !== surfSeq) return;
+  surfL.clearLayers();
+  const add = (features, style) => L.geoJSON({ type: 'FeatureCollection', features }, { renderer: canvas, interactive: false, style }).addTo(surfL);
+  add(ap, { color: '#5b6872', weight: .5, fillColor: '#46525c', fillOpacity: .85 });
+  add(tw, { color: '#8a97a1', weight: .5, fillColor: '#6b7a85', fillOpacity: .9 });
+  add(rw, { color: '#ffffff', weight: 1.5, fillColor: '#1b2126', fillOpacity: .92 });
+  add(hs, { color: '#ef4444', weight: 2.5, fillOpacity: .08 });
+  if (z < 14.5) return;
+  const centre = g => { const ring = g.type === 'Polygon' ? g.coordinates[0] : g.coordinates[0][0]; let x = 0, y = 0; for (const c of ring) { x += c[0]; y += c[1]; } return { lat: y / ring.length, lon: x / ring.length }; };
+  const seen = new Set(); let n = 0;
+  const label = (f, text, cls) => { if (!text || !f.geometry || n > 160) return; const c = centre(f.geometry), k = text + Math.round(c.lat * 500) + Math.round(c.lon * 500); if (seen.has(k)) return; seen.add(k); n++;
+    L.marker([c.lat, c.lon], { interactive: false, keyboard: false, icon: L.divIcon({ className: '', iconSize: [0, 0], html: `<div class="surf ${cls}">${esc(text)}</div>` }) }).addTo(surfL); };
+  rw.forEach(f => label(f, f.properties.DESIGNATOR_TXT, 'rwy'));
+  tw.forEach(f => { const d = f.properties.DESIGNATOR; if (d && d !== 'UNK' && !d.includes('_')) label(f, d, 'twy'); });   // skip unnamed pavement and intersection pieces
+  hs.forEach(f => label(f, f.properties.HOT_ID, 'hot'));
+}, 500);
+
+// ---------- approach plate on the map
+let plateL = null, plateUrl = null;
+export function hidePlate() { plateL?.remove(); plateL = null; if (plateUrl) URL.revokeObjectURL(plateUrl); plateUrl = null; $('#plate-bar').classList.add('hidden'); }
+export async function showPlate(title, cycle, pdf, src) {
+  const { blob, bounds } = await plateImage(cycle, pdf, src);
+  hidePlate();
+  plateUrl = URL.createObjectURL(blob);
+  plateL = L.imageOverlay(plateUrl, bounds, { opacity: .85, interactive: false, pane: 'wx' }).addTo(map);
+  map.fitBounds(bounds);
+  $('#plate-bar').replaceChildren(h('div', { class: 'ttl' }, title),
+    h('input', { type: 'range', min: 20, max: 100, value: 85, title: 'Plate opacity', oninput: e => plateL?.setOpacity(e.target.value / 100) }),
+    h('button', { class: 'btn sm', onclick: hidePlate }, 'Remove'));
+  $('#plate-bar').classList.remove('hidden');
 }

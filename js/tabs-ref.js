@@ -4,7 +4,7 @@ import { search, airport, runways, freqs, plates, magvar, part } from './db.js';
 import { metar, taf, datis, rawWx, notams, hasRelay } from './wx.js';
 import { fmtLL, norm } from './geo.js';
 import { addPoint } from './route.js';
-import { flyTo, inspect } from './map.js';
+import { flyTo, inspect, showPlate } from './map.js';
 
 const recent = { list: () => kv.get('recentApts', []), add(id) { kv.set('recentApts', [id, ...recent.list().filter(x => x !== id)].slice(0, 15)); } };
 const aptRow = (a, onclick, sel) => h('button', { class: 'row' + (sel ? ' sel' : ''), onclick },
@@ -139,7 +139,13 @@ export const Plates = {
   view(a, x, url) {
     this.sp.showDetail();
     this.detail.replaceChildren(
-      h('div', { class: 'pane-head' }, backBtn(() => this.sp.showList()), h('h2', {}, `${a.id} · ${x[1]}`), h('a', { class: 'btn sm', href: url, target: '_blank', rel: 'noopener' }, 'Open in new tab')),
+      h('div', { class: 'pane-head' }, backBtn(() => this.sp.showList()), h('h2', {}, `${a.id} · ${x[1]}`),
+        h('button', { class: 'btn sm', title: 'Place this plate on the map', onclick: async e => {
+          const b = e.currentTarget, [, cycle, pdf] = url.match(/d-tpp\/(\d+)\/(.+)$/); b.disabled = true; b.textContent = 'Placing';
+          try { await showPlate(`${a.id} ${x[1]}`, cycle, pdf); emit('tab', 'maps'); } catch (err) { toast(err.message + '.'); }
+          b.disabled = false; b.textContent = 'Show on map';
+        } }, 'Show on map'),
+        h('a', { class: 'btn sm', href: url, target: '_blank', rel: 'noopener' }, 'Open in new tab')),
       h('iframe', { class: 'viewer', src: url + '#view=FitH', title: x[1] }));
   },
 };

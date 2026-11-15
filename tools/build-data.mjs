@@ -197,14 +197,20 @@ if (want('procs')) try {
   console.log('waypoints added from CIFP:', added);
   await save('fixes.json', fixes);
   for (const l of lines) {
-    if (l[0] !== 'S' || l[4] !== 'P' || (l[12] !== 'D' && l[12] !== 'E')) continue;
-    const apt = l.slice(6, 10).trim(), kind = l[12], name = l.slice(13, 19).trim(), part = PART[kind][l[19]];
+    if (l[0] !== 'S' || l[4] !== 'P' || !'DEF'.includes(l[12])) continue;
+    const apt = l.slice(6, 10).trim(), kind = l[12], name = l.slice(13, 19).trim();
+    // Approaches (F): route type A is a transition; anything else is the final approach course.
+    const part = kind === 'F' ? (l[19] === 'A' ? 't' : 'c') : PART[kind][l[19]];
     const trans = l.slice(20, 25).trim(), fix = l.slice(29, 34).trim();
-    if (!part || !fix || /^RW\d/.test(fix) || fix === apt) continue;
+    if (!part || !fix || fix === apt) continue;
     const p = ((procs[apt] ||= {})[kind] ||= {})[name] ||= { r: {}, c: [], t: {} };
+    // An approach ends at the runway; what follows is the missed approach, which is not drawn.
+    if (/^RW\d/.test(fix)) { if (kind === 'F' && part === 'c') p.end = true; continue; }
+    if (p.end && part === 'c') continue;
     const list = part === 'c' ? p.c : (p[part][trans] ||= []);
     if (list[list.length - 1] !== fix) list.push(fix);
   }
+  for (const a of Object.values(procs)) for (const k of 'DEF') for (const p of Object.values(a[k] || {})) { delete p.end; if (k === 'F') delete p.r; }
   await save('procs.json', procs);
 } catch (e) { console.warn('procedures failed:', e.message); }
 

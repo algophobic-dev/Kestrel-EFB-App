@@ -129,3 +129,10 @@ export const notams = id => cached('n' + id, 10, async () => {
   return j.items || [];
 });
 export const traffic = async (lat, lon, dist) => (await (await fetch(`${relay()}/traffic?lat=${lat.toFixed(3)}&lon=${lon.toFixed(3)}&dist=${Math.round(dist)}`)).json()).ac || [];
+
+// G-AIRMETs (icing, turbulence, IFR) through the relay.
+export const gairmets = () => cached('gairmet', 10, async () => {
+  const r = await fetch(`${relay()}/gairmet`);
+  if (!r.ok) throw new Error(r.status === 404 ? 'The relay is out of date. Run npx wrangler deploy in the server folder' : 'Advisories did not load');
+  return r.json();
+});

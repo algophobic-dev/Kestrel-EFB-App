@@ -65,6 +65,7 @@
           <div class="fpl-route">
             <div id="fpl-chips" class="chips"></div>
             <div class="fpl-actions">
+              <button class="btn sm" id="fpl-routes" title="Suggest a route along airways">Routes</button>
               <button class="btn sm" id="fpl-proc" title="Add a departure or arrival procedure">Procedure</button>
               <button class="btn sm" id="fpl-reverse" title="Reverse route"><svg class="ic"><use href="#i-swap"/></svg></button>
               <button class="btn sm" id="fpl-save" title="Save to Flights"><svg class="ic"><use href="#i-star"/></svg></button>
@@ -75,10 +76,11 @@
         <div class="fpl-stats">
           <div class="stats" id="fpl-stats"></div>
           <div class="seg" id="fpl-mode">
-            <button data-m="edit" class="on">Edit</button><button data-m="navlog">NavLog</button><button data-m="profile">Profile</button>
+            <button data-m="edit" class="on">Edit</button><button data-m="navlog">NavLog</button><button data-m="profile">Profile</button><button data-m="3d">3D</button>
           </div>
         </div>
         <div id="fpl-navlog" class="fpl-pane hidden"></div>
+        <div id="fpl-3d" class="fpl-pane hidden"></div>
         <div id="fpl-profile" class="fpl-pane hidden"><canvas id="profile-canvas"></canvas><div id="profile-info" class="profile-info"></div></div>
       </div>
 
@@ -97,6 +99,7 @@
           <div class="tb-label" id="radar-label"></div>
           <input id="radar-slider" type="range" min="0" max="10" step="1" value="10">
         </div>
+        <div id="plate-bar" class="plate-bar hidden"></div>
         <aside id="inspector" class="inspector hidden"></aside>
         <div id="layers-pop" class="popover layers hidden"></div>
       </div>

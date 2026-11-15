@@ -7,6 +7,7 @@ import { winds } from './wx.js';
 const SAMPLE = {
   id: 'sample', name: 'C172S (sample)', tail: 'N12345', tas: 122, burn: 8.5, fuelCap: 53,
   climbKt: 74, climbFpm: 700, climbGph: 10, descKt: 110, descFpm: 500, descGph: 6,
+  perf: { toRoll: 960, to50: 1630, ldRoll: 575, ld50: 1335 },
   wb: { emptyW: 1680, emptyArm: 39.5, maxW: 2550, cgFwd: 35, cgAft: 47.3, fuelArm: 48,
     stations: [{ name: 'Front seats', arm: 37 }, { name: 'Rear seats', arm: 73 }, { name: 'Baggage', arm: 95 }] },
 };
@@ -45,6 +46,15 @@ export async function parse(text) {
     }
     // SID right after the departure airport, STAR right before the destination. Both end in a digit.
     const pushFixes = (seq, via) => { for (const id of seq) { const last = points[points.length - 1], f = resolve(id, last); if (f && f.id !== last.id) points.push({ ...f, via }); } };
+    // Approach: typed right after the destination airport, optionally followed by a transition name.
+    const appr = prev && prev.kind === 'apt' && points.length > 1 && ((await procs(prev.id)).F || {})[t];
+    if (appr) {
+      const tr = appr.t[toks[i + 1]], dest = points.pop();
+      pushFixes([...(tr || []), ...appr.c], t); points.push(dest);
+      chips.push({ label: t, kind: 'awy', i });
+      if (tr) { i++; chips.push({ label: toks[i], kind: 'awy', i }); }
+      continue;
+    }
     if (prev && /^[A-Z]{3,5}\d$/.test(t)) {
       const sid = points.length === 1 && prev.kind === 'apt' && ((await procs(prev.id)).D || {})[t];
       if (sid) {

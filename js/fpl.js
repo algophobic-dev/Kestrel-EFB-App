@@ -1,6 +1,8 @@
 // Flight plan panel: route chips, totals, NavLog table, terrain and airspace profile.
 import { $, $$, h, on, toast, modal } from './util.js';
 import { procs } from './db.js';
+import { autoroute } from './autoroute.js';
+import { init3d, draw3d } from './view3d.js';
 import { plan, setPlan, removeToken, reverse, current, aircraft, flights } from './route.js';
 import { along, dist, fmtDur, pad3, inGeom } from './geo.js';
 import { elevations } from './wx.js';
@@ -47,6 +49,7 @@ function render(r) {
     stat('Wind', !t ? '--' : r.windPending ? 'Loading' : r.windFailed || t.comp == null ? 'Unavailable' : Math.abs(t.comp) < .5 ? 'Calm' : `${Math.round(Math.abs(t.comp))} kt ${t.comp > 0 ? 'head' : 'tail'}`));
   if (mode === 'navlog') $('#fpl-navlog').replaceChildren(navlogTable(r));
   if (mode === 'profile' && !r.windPending) drawProfile(r);
+  if (mode === '3d' && !r.windPending) draw3d();
 }
 
 function setMode(m) {
@@ -55,6 +58,7 @@ function setMode(m) {
   $('.fpl-top').classList.toggle('hidden', m !== 'edit');
   $('#fpl-navlog').classList.toggle('hidden', m !== 'navlog');
   $('#fpl-profile').classList.toggle('hidden', m !== 'profile');
+  $('#fpl-3d').classList.toggle('hidden', m !== '3d');
   render(current);
 }
 
@@ -72,12 +76,14 @@ export function initFpl() {
   $('#fpl-etd').value = plan.etd; $('#fpl-etd').onchange = e => setPlan({ etd: e.target.value });
   $('#fpl-reverse').onclick = reverse;
   $('#fpl-proc').onclick = openProcs;
+  $('#fpl-routes').onclick = openRoutes;
   $('#fpl-clear').onclick = () => setPlan({ text: '' });
   $('#fpl-save').onclick = () => {
     if (current.points.length < 2) return toast('Add at least two points before saving.');
     flights.save({ name: `${current.points[0].id} → ${current.points[current.points.length - 1].id}`, text: plan.text, alt: plan.alt, acId: plan.acId, etd: plan.etd, saved: Date.now() });
     toast('Flight saved. Open the Flights tab to view it.');
   };
+  init3d();
   $$('#fpl-mode button').forEach(b => b.onclick = () => setMode(b.dataset.m));
   on('route', render);
   if (plan.text) show(true);
@@ -182,26 +188,50 @@ function paintProfile() {
 }
 export { fitRoute };
 
-// ---------- SID and STAR picker
+// ---------- SID, STAR and approach picker
+const APPR = { I: 'ILS', L: 'LOC', R: 'RNAV (GPS)', H: 'RNAV (RNP)', V: 'VOR', S: 'VOR', D: 'VOR/DME', N: 'NDB', Q: 'NDB/DME', B: 'LOC BC', X: 'LDA', U: 'SDF', P: 'GPS', G: 'IGS', T: 'TACAN' };
+const apprLabel = id => `${APPR[id[0]] || id[0]} ${id.slice(1).replace(/^-/, '')}`.trim();
 async function openProcs() {
   const pts = current.points, dep = pts[0], arr = pts.length > 1 ? pts[pts.length - 1] : null;
   if (!dep || dep.kind !== 'apt') return toast('Start the route with a departure airport first.');
-  const D = (await procs(dep.id)).D || {}, E = arr && arr.kind === 'apt' ? (await procs(arr.id)).E || {} : {};
-  const pick = (map, cur) => {
-    const ps = h('select', {}, h('option', { value: '' }, Object.keys(map).length ? 'None' : 'None published'), Object.keys(map).sort().map(n => h('option', { value: n, selected: n === cur }, n)));
+  const hasArr = arr && arr.kind === 'apt', pa = hasArr ? await procs(arr.id) : {};
+  const D = (await procs(dep.id)).D || {}, E = pa.E || {}, F = pa.F || {};
+  let toks = plan.text.split(' ');
+  // Anything typed after the destination is the current approach; set it aside.
+  const destAt = hasArr ? toks.lastIndexOf(toks.find(x => x === arr.id || x === arr.local) || arr.id) : -1;
+  const curAppr = destAt >= 0 ? toks[destAt + 1] : null;
+  if (destAt >= 0) toks = toks.slice(0, destAt + 1);
+  const pick = (map, cur, label) => {
+    const names = Object.keys(map).sort();
+    const ps = h('select', {}, h('option', { value: '' }, names.length ? 'None' : 'None published'), names.map(n => h('option', { value: n, selected: n === cur }, label ? label(n) : n)));
     const ts = h('select', {});
     const fill = () => ts.replaceChildren(h('option', { value: '' }, 'No transition'), ...Object.keys(map[ps.value]?.t || {}).sort().map(n => h('option', { value: n }, n)));
     ps.onchange = fill; fill(); return { ps, ts };
   };
-  const toks = plan.text.split(' ');
-  const d = pick(D, toks.find(x => D[x])), e = pick(E, toks.find(x => E[x]));
-  const f = (label, el) => h('label', { class: 'field' }, h('span', {}, label), el);
+  const d = pick(D, toks.find(x => D[x])), e = pick(E, toks.find(x => E[x])), f = pick(F, F[curAppr] ? curAppr : null, apprLabel);
+  const fld = (label, el) => h('label', { class: 'field' }, h('span', {}, label), el);
   modal('Procedures', h('div', { class: 'form' },
-    f(`Departure from ${dep.id}`, d.ps), f('Transition', d.ts), f(arr && arr.kind === 'apt' ? `Arrival to ${arr.id}` : 'Arrival (add a destination airport)', e.ps), f('Transition', e.ts),
-    h('div', { class: 'note wide' }, 'Applying replaces any procedure already in the route. Runway-specific legs are not drawn.')), [{ label: 'Apply', run: () => {
+    fld(`Departure from ${dep.id}`, d.ps), fld('Transition', d.ts),
+    fld(hasArr ? `Arrival to ${arr.id}` : 'Arrival (add a destination airport)', e.ps), fld('Transition', e.ts),
+    fld(hasArr ? `Approach at ${arr.id}` : 'Approach (add a destination airport)', f.ps), fld('Transition', f.ts),
+    h('div', { class: 'note wide' }, 'Applying replaces any procedure already in the route. Runway-specific legs, vectors and missed approaches are not drawn.')), [{ label: 'Apply', run: () => {
     const t = toks.filter(x => !D[x] && !E[x]);
     if (d.ps.value) t.splice(1, 0, d.ps.value, ...(d.ts.value && !t.includes(d.ts.value) ? [d.ts.value] : []));
     if (e.ps.value) t.splice(t.length - 1, 0, ...(e.ts.value && !t.includes(e.ts.value) ? [e.ts.value] : []), e.ps.value);
+    if (f.ps.value) t.push(f.ps.value, ...(f.ts.value ? [f.ts.value] : []));
     setPlan({ text: t.join(' ') }).then(r => { if (r.errors.length) toast(r.errors[0] + '.'); });
   } }]);
+}
+
+// ---------- route suggestions
+async function openRoutes() {
+  const pts = current.points, dep = pts[0], arr = pts[pts.length - 1];
+  if (pts.length < 2 || dep.kind !== 'apt' || arr.kind !== 'apt') return toast('Enter a departure and a destination airport first.');
+  const direct = dist(dep, arr), box = h('div', { class: 'list' }, h('div', { class: 'row' }, h('div', { class: 's' }, 'Finding routes.')));
+  const close = modal(`Routes from ${dep.id} to ${arr.id}`, box);
+  const [low, high] = await Promise.all([autoroute(dep, arr, 'low').catch(() => null), autoroute(dep, arr, 'high').catch(() => null)]);
+  const opts = [['Direct', `${dep.id} ${arr.id}`, direct], low && ['Low airways (Victor and T routes)', low.text, low.d], high && ['High airways (Jet and Q routes)', high.text, high.d]].filter(Boolean);
+  box.replaceChildren(...opts.map(([name, text, d]) => h('button', { class: 'row', onclick: () => { close(); setPlan({ text }).then(r => { fitRoute(); if (r.errors.length) toast(r.errors[0] + '.'); }); } },
+    h('div', { class: 'grow' }, h('div', { class: 't' }, `${name} · ${Math.round(d)} nm${d > direct + .5 ? ` (+${Math.round(d - direct)})` : ''}`), h('div', { class: 's', style: 'white-space:normal' }, text)))),
+    ...(low || high ? [] : [h('div', { class: 'row' }, h('div', { class: 's' }, 'No airway route found between these airports.'))]));
 }

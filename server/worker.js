@@ -2,6 +2,8 @@
 // It fetches three things a browser cannot fetch directly, and keeps the FAA NOTAM key secret.
 //   GET /wx?ids=KLEX            raw METAR and TAF text (aviationweather.gov)
 //   GET /traffic?lat=&lon=&dist= live ADS-B traffic within dist nm (adsb.lol)
+//   GET /plate?cycle=2611&pdf=X.PDF  one FAA plate PDF, so the app can place it on the map
+//   GET /gairmet               icing, turbulence and IFR advisories as GeoJSON (aviationweather.gov)
 //   GET /notams?icao=KLEX       NOTAMs. Needs one secret set: SKYLINK_API_KEY (skylinkapi.com) or RAPIDAPI_KEY (SkyLink on RapidAPI),
 //                               or FAA_CLIENT_ID and FAA_CLIENT_SECRET (FAA NOTAM API)
 
@@ -38,6 +40,19 @@ export default {
         return json({ ac }, 200, cors, 5);
       }
 
+      if (url.pathname === '/plate') {
+        const cycle = q.get('cycle') || '', pdf = q.get('pdf') || '';
+        if (!/^\d{4}$/.test(cycle) || !/^[A-Za-z0-9_-]{1,40}\.PDF$/i.test(pdf)) return json({ error: 'Bad plate' }, 400, cors);
+        const r = await fetch(`https://aeronav.faa.gov/d-tpp/${cycle}/${pdf}`);
+        if (!r.ok) return json({ error: `FAA answered ${r.status}` }, 502, cors);
+        return new Response(r.body, { headers: { ...cors, 'Content-Type': 'application/pdf', 'Cache-Control': 'public, max-age=86400' } });
+      }
+
+      if (url.pathname === '/gairmet') {
+        const r = await fetch('https://aviationweather.gov/api/data/gairmet?format=geojson', { headers: { 'User-Agent': 'kestrel-efb-relay' } });
+        return new Response(await r.text(), { status: r.ok ? 200 : 502, headers: { ...cors, 'Content-Type': 'application/json', 'Cache-Control': 'public, max-age=600' } });
+      }
+
       if (url.pathname === '/notams') {
         const icao = (q.get('icao') || '').toUpperCase();
         if (!/^[A-Z0-9]{3,4}$/.test(icao)) return json({ error: 'Bad icao' }, 400, cors);
@@ -66,6 +81,6 @@ export default {
     } catch (e) {
       return json({ error: 'Relay error: ' + e.message }, 502, cors);
     }
-    return json({ ok: true, routes: ['/wx', '/traffic', '/notams'] }, url.pathname === '/' ? 200 : 404, cors);
+    return json({ ok: true, routes: ['/wx', '/traffic', '/gairmet', '/plate', '/notams'] }, url.pathname === '/' ? 200 : 404, cors);
   },
 };

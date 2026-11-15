@@ -43,7 +43,7 @@ export const More = {
   },
   editAc(a) {
     const d = JSON.parse(JSON.stringify(a)), w = d.wb ||= { stations: [] };
-    d.taxi ??= 1.5; d.reserve ??= 45;
+    d.taxi ??= 1.5; d.reserve ??= 45; const pf = d.perf ||= {};
     const num = (o, k) => h('input', { type: 'number', step: 'any', min: 0, value: o[k] ?? '', oninput: e => o[k] = +e.target.value });
     const txt = (o, k, ph) => h('input', { type: 'text', value: o[k] ?? '', placeholder: ph, oninput: e => o[k] = e.target.value });
     const stations = h('textarea', { rows: 4, value: w.stations.map(s => `${s.name}, ${s.arm}`).join('\n') });
@@ -51,6 +51,8 @@ export const More = {
       field('Type', txt(d, 'name', 'C172S')), field('Tail number', txt(d, 'tail', 'N12345')), field('Cruise TAS (kt)', num(d, 'tas')), field('Fuel burn (gph)', num(d, 'burn')), field('Usable fuel (gal)', num(d, 'fuelCap')), field('Taxi fuel (gal)', num(d, 'taxi')), field('Reserve (min)', num(d, 'reserve')),
       field('Climb speed (kt)', num(d, 'climbKt')), field('Climb rate (fpm)', num(d, 'climbFpm')), field('Climb burn (gph)', num(d, 'climbGph')),
       field('Descent speed (kt)', num(d, 'descKt')), field('Descent rate (fpm)', num(d, 'descFpm')), field('Descent burn (gph)', num(d, 'descGph')),
+      field('Takeoff ground roll (ft)', num(pf, 'toRoll')), field('Takeoff over 50 ft (ft)', num(pf, 'to50')), field('Landing ground roll (ft)', num(pf, 'ldRoll')), field('Landing over 50 ft (ft)', num(pf, 'ld50')),
+      h('div', { class: 'note wide' }, 'Distances: from your POH at sea level, standard day, max weight, paved runway, no wind.'),
       field('Empty weight (lb)', num(w, 'emptyW')), field('Empty arm (in)', num(w, 'emptyArm')), field('Max weight (lb)', num(w, 'maxW')), field('Forward CG limit (in)', num(w, 'cgFwd')), field('Aft CG limit (in)', num(w, 'cgAft')), field('Fuel arm (in)', num(w, 'fuelArm')),
       field('Loading stations. One per line: name, arm in inches.', stations, 'wide')), [{ label: 'Save', run: () => {
         if (!d.name.trim() || !(d.tas > 0) || !(d.burn > 0)) { toast('Enter a type, cruise speed and fuel burn.'); return false; }
@@ -160,7 +162,7 @@ export const More = {
       h('div', { class: 'cards' },
         card('Planning only', h('p', { style: 'margin:0' }, 'Kestrel EFB is not approved for navigation. Data may be out of date or wrong. Check every route, chart, weather report and NOTAM against official sources before you fly.')),
         card('Data sources', ...[['Charts, airspace, fixes, airways, plates', 'FAA'], ['Airports, runways, frequencies, navaids', 'OurAirports'], ['METAR, TAF, SIGMET', 'National Weather Service'], ['Radar', 'Iowa Environmental Mesonet'], ['Winds aloft, terrain', 'Open-Meteo'], ['Base maps', 'CARTO, OpenStreetMap, USGS']].map(([k, s]) => h('div', { class: 'kv' }, h('span', {}, k), h('span', {}, s)))),
-        card('Not included', h('p', { class: 'note', style: 'margin:0' }, 'Flight plan filing, synthetic vision, 3D view, geo-referenced plates, approach procedures by name, autorouting and takeoff and landing performance are not available in this version. Live traffic and NOTAMs need the relay server. Coverage is the United States only.')),
+        card('Not included', h('p', { class: 'note', style: 'margin:0' }, 'Flight plan filing is not available. Live traffic, weather advisories and plates on the map need the relay server. NOTAMs open in the FAA search. Coverage is the United States only.')),
         card('Install', h('p', { class: 'note', style: 'margin:0' }, 'iPad and iPhone: in Safari, select Share, then Add to Home Screen. Mac and Windows: in Chrome or Edge, select the install icon in the address bar.')))));
   },
 };
