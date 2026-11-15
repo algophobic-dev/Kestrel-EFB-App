@@ -37,10 +37,11 @@ function render(r) {
   $('#fpl-chips').replaceChildren(...r.chips.map(c => h('span', { class: 'chip ' + (c.kind === 'apt' ? '' : c.kind), title: 'Remove ' + c.label, onclick: () => removeToken(c.i) }, c.label)), input);
   const t = r.total, ac = r.ac;
   const stat = (k, v, cls) => h('div', { class: 'stat' }, h('b', {}, k), h('span', { class: cls || '' }, v));
-  const over = t && t.fuel > ac.fuelCap;
+  const over = t && t.req > ac.fuelCap;
   $('#fpl-stats').replaceChildren(
     stat('Dist', t ? f1(t.d) + ' nm' : '--'), stat('ETE', t ? fmtDur(t.min) : '--'), stat('ETA', etaText(r)),
-    stat('Fuel', t ? t.fuel.toFixed(1) + ' g' + (over ? ' · over capacity' : '') : '--', over ? 'bad' : ''),
+    stat('Trip fuel', t ? t.fuel.toFixed(1) + ' g' : '--'),
+    stat('Fuel required', t ? t.req.toFixed(1) + ' g' + (over ? ' · over capacity' : '') : '--', over ? 'bad' : ''),
     stat('Wind', !t ? '--' : r.windPending ? 'Loading' : r.windFailed || t.comp == null ? 'Unavailable' : Math.abs(t.comp) < .5 ? 'Calm' : `${Math.round(Math.abs(t.comp))} kt ${t.comp > 0 ? 'head' : 'tail'}`));
   if (mode === 'navlog') $('#fpl-navlog').replaceChildren(navlogTable(r));
   if (mode === 'profile' && !r.windPending) drawProfile(r);
@@ -103,11 +104,21 @@ async function drawProfile(r) {
   const q = (svc, where) => fetch(`${FAA_FEAT}${svc}/FeatureServer/0/query`, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: `where=${encodeURIComponent(where)}&geometry=${geom}&geometryType=esriGeometryPolyline&inSR=4326&spatialRel=esriSpatialRelIntersects&outFields=NAME,CLASS,TYPE_CODE,UPPER_VAL,UPPER_UOM,UPPER_CODE,LOWER_VAL,LOWER_UOM,LOWER_CODE&outSR=4326&maxAllowableOffset=0.003&f=geojson` })
     .then(x => x.json()).then(j => j.features || []).catch(() => []);
+  const obsP = fetch(`${FAA_FEAT}Digital_Obstacle_File/FeatureServer/0/query`, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: `where=${encodeURIComponent('AGL>=200')}&geometry=${geom}&geometryType=esriGeometryPolyline&inSR=4326&spatialRel=esriSpatialRelIntersects&distance=1&units=esriSRUnit_NauticalMile&outFields=AGL,AMSL&outSR=4326&resultRecordCount=2000&f=geojson` })
+    .then(x => x.json()).then(j => j.features || []).catch(() => []);
   let elev, feats;
   try { [elev, feats] = await Promise.all([elevations(samples), Promise.all([q('Class_Airspace', "CLASS IN ('B','C','D')"), q('Special_Use_Airspace', '1=1')]).then(a => a.flat())]); }
   catch { if (my === profSeq) info.replaceChildren(h('div', { class: 'note' }, 'Terrain did not load. Check your connection.')); return; }
   if (my !== profSeq) return;
   samples.forEach((s, i) => s.elev = elev[i]);
+  // Obstacles within 1 nm of the route, placed at the nearest sample.
+  const obs = (await obsP).filter(f => f.geometry).map(f => {
+    const lo = f.geometry.coordinates[0], la = f.geometry.coordinates[1], k = Math.cos(la * Math.PI / 180); let bi = 0, bd = Infinity;
+    samples.forEach((s, i) => { const d = (s.lat - la) ** 2 + ((s.lon - lo) * k) ** 2; if (d < bd) { bd = d; bi = i; } });
+    return { d: samples[bi].d, msl: f.properties.AMSL, agl: f.properties.AGL };
+  });
+  if (my !== profSeq) return;
   const ft = (v, uom, code, i) => code === 'SFC' ? samples[i].elev : uom === 'FL' ? v * 100 : code === 'AGL' ? samples[i].elev + v : v;
   const spans = [];
   for (const f of feats) {
@@ -120,12 +131,16 @@ async function drawProfile(r) {
   }
   for (const s of spans) { s.lo = Math.max(0, ft(s.p.LOWER_VAL, s.p.LOWER_UOM, s.p.LOWER_CODE, s.i0) || 0); s.hi = ft(s.p.UPPER_VAL, s.p.UPPER_UOM, s.p.UPPER_CODE, s.i0); if (!(s.hi > s.lo)) s.hi = s.lo + 500; }
   const hi = samples.reduce((b, s) => s.elev > b.elev ? s : b);
-  const strike = samples.find((s, i) => i > 1 && i < n - 1 && s.elev >= plan.alt);
-  prof = { samples, spans, total, alt: plan.alt, boxes: [], sel: null, dep: r.points[0].id, arr: r.points[r.points.length - 1].id };
+  const tStrike = samples.find((s, i) => i > 1 && i < n - 1 && s.elev >= plan.alt);
+  const oStrike = obs.filter(o => o.msl >= plan.alt).sort((a, b) => a.d - b.d)[0];
+  const strike = tStrike && oStrike ? (tStrike.d < oStrike.d ? tStrike : oStrike) : tStrike || oStrike;
+  const hiObs = obs.reduce((b, o) => !b || o.msl > b.msl ? o : b, null);
+  prof = { samples, spans, obs, total, alt: plan.alt, boxes: [], sel: null, dep: r.points[0].id, arr: r.points[r.points.length - 1].id };
   const clr = plan.alt - hi.elev;
   info.replaceChildren(
     h('b', {}, 'Highest point'), h('span', {}, `${Math.round(hi.elev).toLocaleString()}' MSL`),
     h('b', {}, 'Clearance'), h('span', { class: clr < 1000 ? 'bad' : clr < 2000 ? 'warn' : '' }, `${Math.round(clr).toLocaleString()}'`),
+    h('b', {}, 'Highest obstacle'), h('span', { class: hiObs && hiObs.msl > plan.alt - 1000 ? (hiObs.msl > plan.alt - 100 ? 'bad' : 'warn') : '' }, hiObs ? `${hiObs.msl.toLocaleString()}' MSL` : 'None'),
     h('b', {}, 'First strike'), h('span', { class: strike ? 'bad' : '' }, strike ? `${Math.round(strike.d)} nm` : 'None'),
     h('b', {}, 'Selected'), h('div', { id: 'prof-sel', class: 'note' }, 'Tap an airspace block.'));
   paintProfile();
@@ -153,6 +168,7 @@ function paintProfile() {
   }
   c.beginPath(); c.moveTo(X(0), H - B); samples.forEach(s => c.lineTo(X(s.d), Y(s.elev))); c.lineTo(X(total), H - B); c.closePath();
   c.fillStyle = '#8d8a73'; c.fill(); c.strokeStyle = '#c9c5a3'; c.lineWidth = 1; c.stroke();
+  for (const o of prof.obs || []) { c.strokeStyle = o.msl > alt - 100 ? '#ef4444' : o.msl > alt - 1000 ? '#f2b134' : '#b9c3ca'; c.lineWidth = 1.5; c.beginPath(); c.moveTo(X(o.d), Y(o.msl - o.agl)); c.lineTo(X(o.d), Y(o.msl)); c.stroke(); }
   c.strokeStyle = '#e23bf0'; c.lineWidth = 2.5; c.beginPath(); c.moveTo(X(0), Y(alt)); c.lineTo(X(total), Y(alt)); c.stroke();
   c.fillStyle = '#fff'; c.textAlign = 'left'; c.font = 'bold 12px system-ui, sans-serif';
   c.fillText(alt.toLocaleString() + "'", L + 4, Y(alt) - 9); c.fillText(prof.dep, L + 4, T - 8); c.textAlign = 'right'; c.fillText(prof.arr, W - R - 2, T - 8);

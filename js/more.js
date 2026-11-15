@@ -1,9 +1,9 @@
 // More tab: Aircraft, Downloads (offline charts), Track logs, About.
-import { h, kv, on, emit, toast, split, backBtn, uid, confirmDel, modal, download } from './util.js';
+import { h, kv, files, on, emit, toast, split, backBtn, uid, confirmDel, modal, download } from './util.js';
 import { aircraft } from './route.js';
-import { part } from './db.js';
-import { BASES, CHARTS, mapView, showTrack } from './map.js';
-import { fmtDur } from './geo.js';
+import { part, marks } from './db.js';
+import { BASES, CHARTS, mapView, showTrack, flyTo } from './map.js';
+import { fmtDur, fmtLL } from './geo.js';
 
 const card = (title, ...kids) => h('div', { class: 'card' }, h('h3', {}, title), kids);
 const field = (label, input, cls) => h('label', { class: 'field ' + (cls || '') }, h('span', {}, label), input);
@@ -21,10 +21,11 @@ function tileUrls(layer, b, z0, z1) {
 export const More = {
   init(view) {
     this.detail = h('div', { class: 'pane-detail' });
-    const items = [['Aircraft', () => this.aircraft()], ['Downloads', () => this.downloads()], ['Track logs', () => this.tracks()], ['About', () => this.about()]];
+    const items = [['Aircraft', () => this.aircraft()], ['Downloads', () => this.downloads()], ['Marked positions', () => this.marks()], ['Map content', () => this.content()], ['Track logs', () => this.tracks()], ['About', () => this.about()]];
     this.list = h('div', { class: 'list' }, items.map(([n, fn]) => h('button', { class: 'row', onclick: e => { this.list.querySelectorAll('.sel').forEach(x => x.classList.remove('sel')); e.currentTarget.classList.add('sel'); this.sp.showDetail(); fn(); } }, h('div', { class: 'grow' }, h('div', { class: 't', style: 'font-weight:600' }, n)))));
     this.sp = split(view, h('div', { class: 'pane-list' }, h('div', { class: 'pane-head' }, h('h2', {}, 'More')), this.list), this.detail);
     on('tracks', () => this.section === 'tracks' && this.tracks());
+    on('marks', () => this.section === 'marks' && this.marks());
     this.about();
   },
   head(title, ...acts) { return h('div', { class: 'hero' }, backBtn(() => this.sp.showList()), h('h1', {}, title), h('div', { class: 'acts' }, acts)); },
@@ -42,11 +43,12 @@ export const More = {
   },
   editAc(a) {
     const d = JSON.parse(JSON.stringify(a)), w = d.wb ||= { stations: [] };
+    d.taxi ??= 1.5; d.reserve ??= 45;
     const num = (o, k) => h('input', { type: 'number', step: 'any', min: 0, value: o[k] ?? '', oninput: e => o[k] = +e.target.value });
     const txt = (o, k, ph) => h('input', { type: 'text', value: o[k] ?? '', placeholder: ph, oninput: e => o[k] = e.target.value });
     const stations = h('textarea', { rows: 4, value: w.stations.map(s => `${s.name}, ${s.arm}`).join('\n') });
     modal(a.id ? 'Edit aircraft' : 'New aircraft', h('div', { class: 'form' },
-      field('Type', txt(d, 'name', 'C172S')), field('Tail number', txt(d, 'tail', 'N12345')), field('Cruise TAS (kt)', num(d, 'tas')), field('Fuel burn (gph)', num(d, 'burn')), field('Usable fuel (gal)', num(d, 'fuelCap')),
+      field('Type', txt(d, 'name', 'C172S')), field('Tail number', txt(d, 'tail', 'N12345')), field('Cruise TAS (kt)', num(d, 'tas')), field('Fuel burn (gph)', num(d, 'burn')), field('Usable fuel (gal)', num(d, 'fuelCap')), field('Taxi fuel (gal)', num(d, 'taxi')), field('Reserve (min)', num(d, 'reserve')),
       field('Empty weight (lb)', num(w, 'emptyW')), field('Empty arm (in)', num(w, 'emptyArm')), field('Max weight (lb)', num(w, 'maxW')), field('Forward CG limit (in)', num(w, 'cgFwd')), field('Aft CG limit (in)', num(w, 'cgAft')), field('Fuel arm (in)', num(w, 'fuelArm')),
       field('Loading stations. One per line: name, arm in inches.', stations, 'wide')), [{ label: 'Save', run: () => {
         if (!d.name.trim() || !(d.tas > 0) || !(d.burn > 0)) { toast('Enter a type, cruise speed and fuel burn.'); return false; }
@@ -109,13 +111,68 @@ export const More = {
         : h('div', { class: 'empty' }, 'No track logs. On the Maps tab, select REC to record your flight.')));
   },
 
+  // ----- Marked positions
+  marks() {
+    this.section = 'marks';
+    const l = marks.list();
+    this.detail.replaceChildren(h('div', { class: 'pad' }, this.head('Marked positions'),
+      l.length ? h('div', { class: 'cards' }, l.map(m => h('div', { class: 'card' }, h('h3', {}, fmtLL(m.lat, m.lon)), h('div', { style: 'font-weight:700;font-size:16px' }, m.name),
+        h('div', { class: 'bar', style: 'margin-top:8px' },
+          h('button', { class: 'btn sm', onclick: () => { emit('tab', 'maps'); setTimeout(() => flyTo(m, 11), 50); } }, 'Show on map'),
+          h('button', { class: 'btn sm danger', onclick: () => confirmDel(m.name, () => marks.remove(m.id)) }, 'Delete')))))
+        : h('div', { class: 'empty' }, 'No marked positions. On the Maps tab, tap the map and select Mark.'),
+      h('p', { class: 'note' }, 'Type a marked position’s name in a route to fly to it.')));
+  },
+
+  // ----- Map content (GeoJSON or KML shown on the map)
+  content() {
+    this.section = 'content';
+    const l = kv.get('content', []);
+    const pick = h('input', { type: 'file', accept: '.geojson,.json,.kml', multiple: true, class: 'hidden', onchange: async e => {
+      const list = kv.get('content', []); let n = 0;
+      for (const f of e.target.files) {
+        try {
+          const text = await f.text(), gj = /\.kml$/i.test(f.name) ? kmlToGeoJSON(text) : JSON.parse(text);
+          const feats = gj.type === 'FeatureCollection' ? gj.features : gj.type === 'Feature' ? [gj] : [];
+          if (!feats.length) throw new Error('empty');
+          const id = uid(); await files.put('content:' + id, { type: 'FeatureCollection', features: feats });
+          list.unshift({ id, name: f.name.replace(/\.[^.]+$/, ''), n: feats.length, added: Date.now() }); n++;
+        } catch { toast(`${f.name} has no shapes this app can read. Use GeoJSON or KML.`); }
+      }
+      kv.set('content', list); e.target.value = ''; emit('content'); this.content(); if (n) toast('Content added to the map.');
+    } });
+    const toggle = c => { kv.set('content', kv.get('content', []).map(x => x.id === c.id ? { ...x, hidden: !x.hidden } : x)); emit('content'); this.content(); };
+    this.detail.replaceChildren(h('div', { class: 'pad' }, this.head('Map content', h('button', { class: 'btn sm primary', onclick: () => pick.click() }, 'Import'), pick),
+      l.length ? h('div', { class: 'cards' }, l.map(c => h('div', { class: 'card' }, h('h3', {}, `${c.n} shapes · ${new Date(c.added).toLocaleDateString()}`), h('div', { style: 'font-weight:700;font-size:16px' }, c.name),
+        h('div', { class: 'bar', style: 'margin-top:8px' },
+          h('button', { class: 'btn sm' + (c.hidden ? '' : ' on'), onclick: () => toggle(c) }, c.hidden ? 'Hidden' : 'Shown'),
+          h('button', { class: 'btn sm danger', onclick: () => confirmDel(c.name, async () => { await files.del('content:' + c.id); kv.set('content', kv.get('content', []).filter(x => x.id !== c.id)); emit('content'); this.content(); }) }, 'Delete')))))
+        : h('div', { class: 'empty' }, 'No map content. Select Import to add a GeoJSON or KML file.'),
+      h('p', { class: 'note' }, 'Points, lines and areas from the file are drawn on the map in amber. Files stay on this device.')));
+  },
+
   // ----- About
   about() {
     this.section = 'about';
     this.detail.replaceChildren(h('div', { class: 'pad' }, this.head('About Kestrel EFB'),
       h('div', { class: 'cards' },
+        card('Planning only', h('p', { style: 'margin:0' }, 'Kestrel EFB is not approved for navigation. Data may be out of date or wrong. Check every route, chart, weather report and NOTAM against official sources before you fly.')),
         card('Data sources', ...[['Charts, airspace, fixes, airways, plates', 'FAA'], ['Airports, runways, frequencies, navaids', 'OurAirports'], ['METAR, TAF, SIGMET', 'National Weather Service'], ['Radar', 'Iowa Environmental Mesonet'], ['Winds aloft, terrain', 'Open-Meteo'], ['Base maps', 'CARTO, OpenStreetMap, USGS']].map(([k, s]) => h('div', { class: 'kv' }, h('span', {}, k), h('span', {}, s)))),
-        card('Not included', h('p', { class: 'note', style: 'margin:0' }, 'Flight plan filing, NOTAM text, live traffic, synthetic vision, 3D view, geo-referenced plates, takeoff and landing performance, and climb or descent modeling are not available in this version. Coverage is the United States only.')),
+        card('Not included', h('p', { class: 'note', style: 'margin:0' }, 'Flight plan filing, synthetic vision, 3D view, geo-referenced plates, procedures by name, takeoff and landing performance, and climb or descent modeling are not available in this version. Live traffic and NOTAMs need the relay server. Coverage is the United States only.')),
         card('Install', h('p', { class: 'note', style: 'margin:0' }, 'iPad and iPhone: in Safari, select Share, then Add to Home Screen. Mac and Windows: in Chrome or Edge, select the install icon in the address bar.')))));
   },
 };
+
+// Minimal KML reader: Placemark points, lines and polygons.
+function kmlToGeoJSON(text) {
+  const xml = new DOMParser().parseFromString(text, 'text/xml'), feats = [];
+  const coords = el => (el?.textContent || '').trim().split(/\s+/).map(c => c.split(',').slice(0, 2).map(Number)).filter(c => c.length === 2 && c.every(isFinite));
+  for (const pm of xml.getElementsByTagName('Placemark')) {
+    const name = pm.getElementsByTagName('name')[0]?.textContent || '';
+    const add = (type, coordinates) => feats.push({ type: 'Feature', properties: { name }, geometry: { type, coordinates } });
+    for (const p of pm.getElementsByTagName('Point')) { const c = coords(p.getElementsByTagName('coordinates')[0]); if (c[0]) add('Point', c[0]); }
+    for (const l of pm.getElementsByTagName('LineString')) { const c = coords(l.getElementsByTagName('coordinates')[0]); if (c.length > 1) add('LineString', c); }
+    for (const g of pm.getElementsByTagName('Polygon')) { const c = coords(g.getElementsByTagName('outerBoundaryIs')[0]?.getElementsByTagName('coordinates')[0]); if (c.length > 2) add('Polygon', [c]); }
+  }
+  return { type: 'FeatureCollection', features: feats };
+}

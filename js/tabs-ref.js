@@ -1,7 +1,7 @@
 // Reference tabs: Airports, Plates, Imagery, Documents.
 import { $, h, icon, kv, files, emit, toast, split, backBtn, uid, confirmDel, debounce } from './util.js';
 import { search, airport, runways, freqs, plates, magvar, part } from './db.js';
-import { metar, taf } from './wx.js';
+import { metar, taf, datis, rawWx, notams, hasRelay } from './wx.js';
 import { fmtLL, norm } from './geo.js';
 import { addPoint } from './route.js';
 import { flyTo, inspect } from './map.js';
@@ -38,6 +38,11 @@ export const Airports = {
     const tafBox = h('pre', { class: 'raw' }, a.wx === 2 ? 'Loading TAF.' : 'No TAF is issued for this airport.');
     const rwBox = h('div', {}, 'Loading'), fqBox = h('div', {}, 'Loading');
     const mv = magvar(a);
+    const datisBox = h('pre', { class: 'raw' }), datisCard = card('D-ATIS', datisBox); datisCard.classList.add('hidden');
+    const notamBox = h('div', {}, hasRelay() ? 'Loading NOTAMs.' : h('div', { class: 'note' }, 'NOTAMs need the relay server. See the README to set it up, or search at faa.gov.'));
+    const fuelNote = h('input', { type: 'text', placeholder: 'For example 100LL 6.45 self-serve', value: kv.get('fuelNotes', {})[a.id] || '', style: 'width:100%',
+      onchange: e => { const n = kv.get('fuelNotes', {}); e.target.value.trim() ? n[a.id] = e.target.value.trim() : delete n[a.id]; kv.set('fuelNotes', n); toast('Fuel note saved on this device.'); } });
+    let gotRaw = false;
     this.detail.replaceChildren(h('div', { class: 'pad' },
       h('div', { class: 'hero' }, backBtn(() => this.sp.showList()), h('h1', {}, a.id), tag, h('div', { class: 'sub' }, `${a.name} · ${a.city}${a.state ? ', ' + a.state : ''}`),
         h('div', { class: 'acts' },
@@ -45,19 +50,33 @@ export const Airports = {
           h('button', { class: 'btn sm', onclick: () => { addPoint(a.id); toast(`${a.id} added to route.`); } }, 'Add to route'),
           h('button', { class: 'btn sm', onclick: () => emit('open-plates', a.id) }, 'Plates'))),
       h('div', { class: 'cards' },
-        card('METAR', wxBox), card('TAF', tafBox),
+        card('METAR', wxBox), card('TAF', tafBox), datisCard,
         card('Airport', kvRow('Type', a.typeName), kvRow('Elevation', `${a.elev.toLocaleString()}' MSL`), kvRow('Position', fmtLL(a.lat, a.lon)),
           kvRow('Variation', `${Math.abs(mv).toFixed(0)}°${mv >= 0 ? 'E' : 'W'}`), a.local && kvRow('FAA identifier', a.local),
           h('div', { class: 'note', style: 'margin-top:6px' }, h('a', { href: 'https://notams.aim.faa.gov/notamSearch/', target: '_blank', rel: 'noopener' }, 'Search NOTAMs at faa.gov'))),
-        card('Runways', rwBox), card('Frequencies', fqBox))));
+        card('Runways', rwBox), card('Frequencies', fqBox),
+        card('Fuel', h('label', { class: 'field' }, h('span', {}, 'Your price note'), fuelNote),
+          h('div', { class: 'note', style: 'margin-top:6px' }, h('a', { href: `https://www.airnav.com/airport/${a.local || a.id}`, target: '_blank', rel: 'noopener' }, 'See fuel prices at airnav.com'))),
+        card('NOTAMs', notamBox))));
     const cur = a.id;
     const wind = a.wx ? metar(a.wxId).then(m => {
       if (this.cur !== cur) return null;
       tag.textContent = m.cat || 'No category'; tag.className = 'tag ' + (m.cat || '');
-      wxBox.textContent = m.raw + `\n\nObserved ${m.time.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}` + (m.decoded ? ' · rebuilt from sensor values' : '');
+      if (!gotRaw) wxBox.textContent = m.raw + `\n\nObserved ${m.time.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}` + (m.decoded ? ' · rebuilt from sensor values' : '');
       return m;
     }).catch(() => { tag.textContent = 'No weather'; wxBox.textContent = 'METAR did not load. Check your connection.'; return null; }) : Promise.resolve(null);
-    if (a.wx === 2) taf(a.wxId).then(t => { if (this.cur === cur) tafBox.textContent = t.raw; }).catch(() => { tafBox.textContent = 'TAF did not load.'; });
+    if (a.wx === 2) taf(a.wxId).then(t => { if (this.cur === cur && !gotRaw) tafBox.textContent = t.raw; }).catch(() => { tafBox.textContent = 'TAF did not load.'; });
+    if (a.wx) datis(a.wxId).then(list => {
+      if (this.cur !== cur || !list.length) return;
+      datisBox.textContent = list.map(d => (list.length > 1 ? (d.type === 'arr' ? 'ARRIVAL\n' : d.type === 'dep' ? 'DEPARTURE\n' : '') : '') + d.datis).join('\n\n');
+      datisCard.classList.remove('hidden');
+    }).catch(() => { });
+    if (hasRelay()) {
+      if (a.wx) rawWx(a.wxId).then(r => { if (this.cur !== cur) return; if (r.metar) { gotRaw = true; wxBox.textContent = r.metar; } if (r.taf) tafBox.textContent = r.taf; }).catch(() => { });
+      notams(a.wxId.length === 4 ? a.wxId : a.id).then(list => { if (this.cur !== cur) return;
+        notamBox.replaceChildren(...(list.length ? list.map(n => h('pre', { class: 'raw', style: 'padding:6px 0;border-bottom:1px solid var(--line)' }, n.text)) : ['No NOTAMs for this airport.']));
+      }).catch(e => { if (this.cur === cur) notamBox.textContent = e.message + '.'; });
+    }
     Promise.all([runways(a.id), wind]).then(([rw, m]) => {
       if (this.cur !== cur) return;
       if (!rw.length) return rwBox.replaceChildren('No runway data.');

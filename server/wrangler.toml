@@ -1,0 +1,7 @@
+name = "kestrel-relay"
+main = "worker.js"
+compatibility_date = "2026-01-01"
+
+[vars]
+# Sites allowed to use this relay, comma separated. Use your GitHub Pages address.
+ALLOWED_ORIGINS = "https://algophobic-dev.github.io,http://localhost:8765"

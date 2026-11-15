@@ -1,5 +1,13 @@
 // Navigation database: airports, navaids, fixes, airways, runways, frequencies, plates.
 import { dist } from './geo.js';
+import { kv, emit, uid } from './util.js';
+
+// Marked positions: the pilot's own named waypoints. Usable in routes by name.
+export const marks = {
+  list: () => kv.get('marks', []),
+  add(name, lat, lon) { kv.set('marks', [...marks.list().filter(m => m.name !== name), { id: uid(), name, lat: +lat.toFixed(5), lon: +lon.toFixed(5) }]); emit('marks'); },
+  remove(id) { kv.set('marks', marks.list().filter(m => m.id !== id)); emit('marks'); },
+};
 
 const TYPE_NAMES = ['Airport', 'Airport', 'Airport', 'Seaplane base', 'Heliport'];
 export const db = { airports: [], navaids: [], fixes: [], ready: false };
@@ -37,6 +45,8 @@ export function resolve(tok, near) {
   tok = tok.toUpperCase();
   const ll = tok.match(/^(-?\d+(?:\.\d+)?)[,/](-?\d+(?:\.\d+)?)$/);
   if (ll) return { kind: 'll', id: `${(+ll[1]).toFixed(2)}/${(+ll[2]).toFixed(2)}`, name: 'Position', lat: +ll[1], lon: +ll[2] };
+  const m = marks.list().find(x => x.name === tok);
+  if (m) return { kind: 'mark', id: m.name, name: 'Marked position', lat: m.lat, lon: m.lon };
   return byId.get(tok) || nearest(navBy.get(tok), near) || nearest(fixBy.get(tok), near) || byLocal.get(tok) || byId.get('K' + tok) || null;
 }
 

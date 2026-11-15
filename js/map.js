@@ -1,8 +1,8 @@
 // Moving map: base maps, FAA charts, aeronautical overlay, airspace, radar, SIGMETs, ownship, inspector.
-import { $, h, icon, kv, on, emit, debounce, toast, esc, uid } from './util.js';
-import { db, inBox, nearby, search, resolve } from './db.js';
+import { $, h, icon, kv, files, on, emit, debounce, toast, esc, uid, modal } from './util.js';
+import { db, inBox, nearby, search, resolve, marks } from './db.js';
 import { along, dist, bearing, fmtLL, compass, norm } from './geo.js';
-import { metar, sigmets, elevations } from './wx.js';
+import { metar, sigmets, elevations, traffic } from './wx.js';
 import { plan, setPlan, addPoint, current } from './route.js';
 import { CONFIG } from './config.js';
 
@@ -25,13 +25,13 @@ export const CHARTS = {
   low: { name: 'IFR Low', url: FAA_TILES + 'IFR_AreaLow/MapServer/tile/{z}/{y}/{x}', min: 7, max: 12 },
   high: { name: 'IFR High', url: FAA_TILES + 'IFR_High/MapServer/tile/{z}/{y}/{x}', min: 5, max: 9 },
 };
-const OVERLAYS = { aero: 'Airports and navaids', airspace: 'Airspace', radar: 'Radar', cat: 'Flight category', sigmet: 'SIGMETs' };
+const OVERLAYS = { aero: 'Airports and navaids', airspace: 'Airspace', radar: 'Radar', cat: 'Flight category', sigmet: 'SIGMETs', hazard: 'Terrain hazard', obstacles: 'Obstacles', traffic: 'Traffic' };
 const RADAR = o => `https://mesonet.agron.iastate.edu/cache/tile.py/1.0.0/nexrad-n0q-900913${o ? '-m' + String(o).padStart(2, '0') + 'm' : ''}/{z}/{x}/{y}.png`;
 
 const st = Object.assign({ base: 'dark', chart: 'none', ov: { aero: true, airspace: true, radar: false, cat: true, sigmet: false }, c: [39.1, -84.5], z: 8 }, kv.get('map', {}));
 const save = () => kv.set('map', st);
 export let map;
-let baseL, chartL, radarL, aeroL, routeL, airspaceL, sigmetL, ownL, canvas;
+let baseL, chartL, radarL, aeroL, routeL, airspaceL, sigmetL, ownL, canvas, hazardL, obsL, trafficL, marksL, contentL;
 const cats = new Map(), markers = new Map();
 
 export const altText = (v, uom, code) => code === 'SFC' || (v === 0 && code !== 'MSL') ? 'Surface' : v == null || v < 0 ? (code || 'Unknown') : uom === 'FL' ? 'FL' + v : `${Number(v).toLocaleString()}' ${code || 'MSL'}`;
@@ -43,14 +43,16 @@ export function initMap() {
   canvas = L.canvas({ padding: .3 });
   map.createPane('wx').style.zIndex = 350;
   airspaceL = L.layerGroup().addTo(map); sigmetL = L.layerGroup().addTo(map);
-  routeL = L.layerGroup().addTo(map); aeroL = L.layerGroup().addTo(map);
+  contentL = L.layerGroup().addTo(map); obsL = L.layerGroup().addTo(map);
+  routeL = L.layerGroup().addTo(map); aeroL = L.layerGroup().addTo(map); marksL = L.layerGroup().addTo(map); trafficL = L.layerGroup().addTo(map);
   applyTiles(); applyOverlays();
 
-  map.on('moveend', () => { const c = map.getCenter(); st.c = [c.lat, c.lng]; st.z = map.getZoom(); save(); drawAero(); loadAirspace(); });
+  map.on('moveend', () => { const c = map.getCenter(); st.c = [c.lat, c.lng]; st.z = map.getZoom(); save(); drawAero(); loadAirspace(); loadObstacles(); });
   map.on('click', e => inspect({ lat: e.latlng.lat, lon: e.latlng.lng }));
   map.on('dragstart', () => setFollow(false));
   new ResizeObserver(() => { if ($('#map').clientWidth) map.invalidateSize(); }).observe($('#map'));
-  on('route', r => { drawRoute(r); drawAero(); });
+  on('route', r => { drawRoute(r); drawAero(); refreshHazard(); });
+  on('marks', drawMarks); on('content', drawContent);
 
   $('#tool-zin').onclick = () => map.zoomIn(1); $('#tool-zout').onclick = () => map.zoomOut(1);
   $('#tool-follow').onclick = () => setFollow(!follow);
@@ -58,7 +60,7 @@ export function initMap() {
   $('#btn-center').onclick = fitRoute;
   $('#btn-layers').onclick = e => { e.stopPropagation(); const p = $('#layers-pop'); p.classList.toggle('hidden'); if (!p.classList.contains('hidden')) drawLayersPop(); };
   document.addEventListener('click', e => { if (!e.target.closest('#layers-pop')) $('#layers-pop').classList.add('hidden'); if (!e.target.closest('.search')) $('#search-results').classList.add('hidden'); });
-  initRadarBar(); initSearch(); drawAero(); loadAirspace();
+  initRadarBar(); initSearch(); drawAero(); loadAirspace(); drawMarks(); drawContent();
 }
 
 // ---------- tiles and overlays
@@ -77,6 +79,9 @@ function applyOverlays() {
   $('#map-clock').classList.toggle('hidden', !st.ov.radar);
   if (st.ov.radar) { radarL = L.tileLayer(RADAR(0), { opacity: .7, pane: 'wx', maxNativeZoom: 9, attribution: 'IEM radar' }).addTo(map); setRadarFrame(10); }
   drawAero(); loadAirspace(); loadSigmets();
+  hazardL?.remove(); hazardL = null; hazardAt = null;
+  if (st.ov.hazard) { hazardL = new Hazard({ pane: 'wx', maxNativeZoom: 11, minZoom: 6, attribution: 'Terrain: Mapzen' }).addTo(map); hazardAt = hazardRef(); }
+  loadObstacles(); setTraffic();
 }
 function drawLayersPop() {
   const radio = (group, key, label) => h('label', { class: 'row' }, h('input', { type: 'radio', name: group, checked: st[group] === key, onchange: () => { st[group] = key; save(); applyTiles(); } }), label);
@@ -276,8 +281,9 @@ export async function inspect(p, focus) {
       h('button', { class: 'btn sm', title: 'Replace the route with a direct course here', onclick: () => { const x = near[0]?.d < rad / 3 || focus ? near[0] : { kind: 'll', ...p }; const from = own ? `${own.lat.toFixed(4)}/${own.lon.toFixed(4)}` : current.points[0]?.id; if (!from) return toast('Direct To needs a position or a departure point.'); setPlan({ text: `${from} ${x.kind === 'll' ? `${x.lat.toFixed(4)}/${x.lon.toFixed(4)}` : x.id}` }); close(); } }, 'Direct To')),
     h('div', { class: 'body' },
       h('div', { class: 'sect' }, 'Location'),
-      h('div', { class: 'row' }, h('div', { class: 'grow' }, h('div', { class: 't' }, fmtLL(p.lat, p.lon)), locSub), h('button', { class: 'pill go', onclick: () => add({ kind: 'll', ...p }) }, 'Add')),
+      h('div', { class: 'row' }, h('div', { class: 'grow' }, h('div', { class: 't' }, fmtLL(p.lat, p.lon)), locSub), h('button', { class: 'pill', title: 'Save this spot as a named position', onclick: () => markAt(p) }, 'Mark'), h('button', { class: 'pill go', onclick: () => add({ kind: 'll', ...p }) }, 'Add')),
       h('div', { class: 'sect' }, 'Airspace'), asBox,
+      obsRows(p, rad),
       h('div', { class: 'sect' }, 'Nearby'),
       near.length ? near.map(rowFor) : h('div', { class: 'row' }, h('div', { class: 's' }, 'Nothing nearby. Zoom in to see fixes.'))));
   box.classList.remove('hidden');
@@ -312,3 +318,103 @@ function initSearch() {
   };
 }
 export const mapView = () => ({ bounds: map.getBounds(), zoom: map.getZoom(), base: st.base, chart: st.chart });
+
+// ---------- terrain hazard: red within 100 ft of your altitude, yellow within 1,000 ft
+// Uses GPS altitude when a fix is available, else the flight plan altitude.
+const hazardRef = () => own && own.alt > 0 ? own.alt : plan.alt;
+let hazardAt = null;
+const Hazard = L.GridLayer.extend({
+  createTile(c, done) {
+    const cv = document.createElement('canvas'); cv.width = cv.height = 256;
+    const img = new Image(); img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      const g = cv.getContext('2d', { willReadFrequently: true }); g.drawImage(img, 0, 0);
+      const d = g.getImageData(0, 0, 256, 256), p = d.data, ref = hazardRef() / 3.28084;
+      for (let i = 0; i < p.length; i += 4) {
+        const m = p[i] * 256 + p[i + 1] + p[i + 2] / 256 - 32768;
+        if (m > ref - 30.5) { p[i] = 239; p[i + 1] = 68; p[i + 2] = 68; p[i + 3] = 125; }
+        else if (m > ref - 304.8) { p[i] = 245; p[i + 1] = 200; p[i + 2] = 40; p[i + 3] = 100; }
+        else p[i + 3] = 0;
+      }
+      g.putImageData(d, 0, 0); done(null, cv);
+    };
+    img.onerror = () => done(null, cv);
+    img.src = `https://s3.amazonaws.com/elevation-tiles-prod/terrarium/${c.z}/${c.x}/${c.y}.png`;
+    return cv;
+  },
+});
+function refreshHazard() {
+  const ref = hazardRef();
+  if (hazardAt != null && Math.abs(ref - hazardAt) >= 100) { hazardAt = ref; hazardL?.redraw(); loadObstacles(); }
+}
+on('gps', refreshHazard);
+
+// ---------- obstacles (FAA Digital Obstacle File)
+let obsSeq = 0, obstacles = [];
+const loadObstacles = debounce(async () => {
+  if (!map) return;
+  const my = ++obsSeq;
+  if (!st.ov.obstacles || map.getZoom() < 9) { obsL.clearLayers(); obstacles = []; return; }
+  const minAgl = map.getZoom() >= 11.5 ? 0 : 200;
+  const j = await fetch(`${FAA_FEAT}Digital_Obstacle_File/FeatureServer/0/query?where=${encodeURIComponent('AGL>=' + minAgl)}${envelope(map.getBounds())}&outFields=Type_Code,AGL,AMSL&outSR=4326&resultRecordCount=1500&f=geojson`).then(r => r.json()).catch(() => ({ features: [] }));
+  if (my !== obsSeq) return;
+  obsL.clearLayers();
+  obstacles = (j.features || []).filter(f => f.geometry).map(f => ({ lat: f.geometry.coordinates[1], lon: f.geometry.coordinates[0], type: (f.properties.Type_Code || 'Obstacle').trim(), agl: f.properties.AGL, msl: f.properties.AMSL }));
+  const ref = hazardRef();
+  for (const o of obstacles) L.circleMarker([o.lat, o.lon], { renderer: canvas, interactive: false, radius: o.agl >= 1000 ? 5.5 : 3.5, weight: 1, color: '#10161a', fillOpacity: .95,
+    fillColor: o.msl > ref - 100 ? '#ef4444' : o.msl > ref - 1000 ? '#f2b134' : '#aeb9c1' }).addTo(obsL);
+}, 500);
+function obsRows(p, rad) {
+  const near = obstacles.map(o => ({ ...o, d: dist(p, o) })).filter(o => o.d <= rad).sort((a, b) => b.msl - a.msl).slice(0, 4);
+  if (!near.length) return [];
+  const cap = s => s.charAt(0) + s.slice(1).toLowerCase();
+  return [h('div', { class: 'sect' }, 'Obstacles'), ...near.map(o => h('div', { class: 'row' }, h('div', { class: 'grow' },
+    h('div', { class: 't' }, `${o.msl.toLocaleString()}' MSL`), h('div', { class: 's' }, `${cap(o.type)} · ${o.agl.toLocaleString()}' AGL · ${o.d.toFixed(1)} nm ${compass(bearing(p, o))}`))))];
+}
+
+// ---------- live traffic (needs the relay server in CONFIG.proxyUrl)
+let trafficTimer = null;
+async function loadTraffic() {
+  if (!st.ov.traffic || document.hidden || !$('#v-maps').classList.contains('active')) return;
+  const c = map.getCenter(), b = map.getBounds();
+  const r = Math.min(250, Math.max(10, dist({ lat: b.getNorth(), lon: b.getWest() }, { lat: c.lat, lon: c.lng })));
+  let list; try { list = await traffic(c.lat, c.lng, r); } catch { return; }
+  if (!st.ov.traffic) return;
+  trafficL.clearLayers();
+  for (const a of list.slice(0, 300)) {
+    const alt = a.alt === 'ground' ? 'GND' : a.alt != null ? String(Math.round(a.alt / 100)).padStart(3, '0') + (a.vs > 300 ? '↑' : a.vs < -300 ? '↓' : '') : '';
+    L.marker([a.lat, a.lon], { interactive: false, keyboard: false, icon: L.divIcon({ className: '', iconSize: [0, 0],
+      html: `<div class="tfc"><span style="transform:rotate(${Math.round(a.track || 0)}deg)">${PLANE}</span><b>${esc(a.flight || a.type || '')}<br>${alt}</b></div>` }) }).addTo(trafficL);
+  }
+}
+function setTraffic() {
+  clearInterval(trafficTimer); trafficTimer = null; trafficL.clearLayers();
+  if (!st.ov.traffic) return;
+  if (!CONFIG.proxyUrl) { st.ov.traffic = false; save(); toast('Traffic needs the relay server. See the README to set it up.'); return; }
+  loadTraffic(); trafficTimer = setInterval(loadTraffic, 8000);
+}
+
+// ---------- marked positions and imported map content
+function drawMarks() {
+  marksL.clearLayers();
+  for (const m of marks.list()) mk({ lat: m.lat, lon: m.lon, id: m.name }, 'mark').addTo(marksL);
+}
+function markAt(p) {
+  const name = h('input', { type: 'text', maxLength: 8, placeholder: 'For example CABIN', style: 'width:100%;text-transform:uppercase' });
+  modal('Mark this position', h('div', { class: 'form' }, h('label', { class: 'field wide' }, h('span', {}, 'Name. 2 to 8 letters or digits. Use it in routes.'), name), h('div', { class: 'note wide' }, fmtLL(p.lat, p.lon))), [{ label: 'Save', run: () => {
+    const n = name.value.trim().toUpperCase();
+    if (!/^[A-Z0-9]{2,8}$/.test(n)) { toast('Use 2 to 8 letters or digits, no spaces.'); return false; }
+    if (resolve(n) && !marks.list().some(m => m.name === n)) { toast(`${n} is already an airport, navaid or fix. Choose another name.`); return false; }
+    marks.add(n, p.lat, p.lon); toast(`${n} saved. Type it in a route to use it.`);
+  } }]);
+  setTimeout(() => name.focus(), 50);
+}
+async function drawContent() {
+  contentL.clearLayers();
+  for (const c of kv.get('content', [])) {
+    if (c.hidden) continue;
+    const gj = await files.get('content:' + c.id); if (!gj) continue;
+    L.geoJSON(gj, { renderer: canvas, interactive: false, style: { color: '#ffb020', weight: 2.5, fillOpacity: .12 },
+      pointToLayer: (f, ll) => L.circleMarker(ll, { renderer: canvas, radius: 5, color: '#10161a', weight: 1, fillColor: '#ffb020', fillOpacity: 1, interactive: false }) }).addTo(contentL);
+  }
+}

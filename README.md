@@ -1,43 +1,41 @@
 # Kestrel EFB
 
-A free flight-planning app for US pilots. It runs in the browser and installs on Mac, Windows, iPad, iPhone, and Android.
+A free flight-planning app for US pilots. It runs in the browser and installs on Mac, Windows, iPad and iPhone.
 
-## Install on your device
-
-Kestrel EFB works as an installable web app (PWA) with offline caching. No app store account or payment is required.
-
-### iPhone & iPad (Safari)
-1. Open the live site in **Safari**.
-2. Tap the **Share** button (the square with an upward arrow in the toolbar).
-3. Scroll down and tap **Add to Home Screen**.
-4. Tap **Add** in the top-right corner.
-
-### Android (Chrome)
-1. Open the live site in **Chrome**.
-2. Tap the **three-dot menu** in the top-right corner.
-3. Tap **Install app** or **Add to Home screen**.
-4. Follow the prompt to confirm.
-
-### Mac & Windows (Chrome / Edge / Safari)
-* **Chrome or Edge:** Click the **install icon** (a monitor with a downward arrow) on the right side of the address bar, then click **Install**.
-* **Safari (Mac):** Click **File > Add to Dock...** in the top menu bar, then click **Add**.
-
-*(Note: After installing, open the app once while connected to the internet so it can cache core files for offline cockpit use.)*
+**Planning only. Not approved for navigation.** Check every route, chart, weather report and NOTAM against official sources before you fly.
 
 ## What it does
 
 | Tab | Function |
 |---|---|
-| Maps | FAA VFR sectional, terminal, IFR low and high charts. Airports, navaids, fixes, Class B/C/D and special use airspace. Animated radar, flight category dots, SIGMETs. Tap anywhere to add a point to the route. GPS position and track log recording. |
+| Maps | FAA VFR sectional, terminal, IFR low and high charts. Airports, navaids, fixes, Class B/C/D and special use airspace. Animated radar, flight category dots, SIGMETs, obstacles, terrain hazard coloring, live traffic (with the relay). Tap anywhere to add a point to the route or mark a position. GPS position and track log recording. |
 | Flight plan (FPL) | Type a route (`KLUK HYK V97 CVG KCVG`). Airways expand to their fixes. NavLog with winds aloft, heading, time and fuel. Profile view of terrain and airspace along the route. |
-| Airports | METAR, TAF, runways with wind components, frequencies. |
+| Airports | METAR, TAF, D-ATIS, runways with wind components, frequencies, NOTAMs (with the relay), a fuel price note and link. |
 | Plates | Current FAA approach plates, departures, arrivals and airport diagrams. Save an airport's plates for offline use. |
 | Imagery | Prog charts, surface analysis, radar, satellite, icing, winds aloft. |
 | Flights | Saved flights, printable NavLog, weight and balance. |
 | ScratchPads, Checklist, Logbook, Documents | Handwritten notes with ATIS and CRAFT templates, checklists with speech, a logbook with CSV export, imported PDFs. |
-| More | Aircraft profiles, offline chart downloads, track logs with GPX export. |
+| More | Aircraft profiles, offline chart downloads, marked positions, imported map content (GeoJSON, KML), track logs with GPX export. |
 
-Not included: flight plan filing, NOTAM text, live traffic, synthetic vision, 3D view, geo-referenced plates, takeoff and landing performance, climb and descent modeling. Coverage is the United States only.
+Not included: flight plan filing, synthetic vision, 3D view, geo-referenced plates, procedures by name, autorouting, takeoff and landing performance, climb and descent modeling. Coverage is the United States only.
+
+## Put it on GitHub
+
+There is no build step. The repository is the app.
+
+1. Create a repository and upload every file and folder in this directory.
+2. In the repository, open **Settings > Pages**, set the source to the `main` branch and the root folder, and save.
+3. Open the address GitHub shows. Install it from there:
+   - iPad and iPhone: in Safari, select Share, then Add to Home Screen.
+   - Mac and Windows: in Chrome or Edge, select the install icon in the address bar.
+
+To run it on your own computer instead:
+
+```bash
+python3 -m http.server 8765
+```
+
+Then open `http://localhost:8765`.
 
 ## Keep the data current
 
@@ -48,6 +46,32 @@ node tools/build-data.mjs
 ```
 
 The included GitHub Action (`.github/workflows/update-data.yml`) runs this weekly and commits the result. It needs no secrets.
+
+## Relay server (optional, free)
+
+Live traffic, NOTAMs and raw METAR/TAF text cannot be fetched by a browser directly. The small relay in `server/` fetches them for the app. It runs on the Cloudflare Workers free plan (100,000 requests a day). The app works without it; those three features stay off.
+
+1. Create a free account at cloudflare.com.
+2. Deploy the relay:
+
+```bash
+cd server
+npx wrangler login
+npx wrangler deploy
+```
+
+3. Copy the address it prints (like `https://kestrel-relay.yourname.workers.dev`) into `proxyUrl` in `js/config.js`, then upload that file.
+4. In `server/wrangler.toml`, set `ALLOWED_ORIGINS` to your site's address so other sites cannot use your relay, then deploy again.
+
+Traffic and raw weather work as soon as the relay is deployed. NOTAMs also need an FAA key:
+
+1. Register at the FAA API portal (api.faa.gov) and request access to the NOTAM API. It is free; approval can take a few days.
+2. Store the two values the FAA gives you as secrets. They never go in the repository:
+
+```bash
+npx wrangler secret put FAA_CLIENT_ID
+npx wrangler secret put FAA_CLIENT_SECRET
+```
 
 ## Map key
 
@@ -64,5 +88,8 @@ All free, with no paid API.
 | METAR, TAF, SIGMET | National Weather Service |
 | Radar | Iowa Environmental Mesonet |
 | Winds aloft, terrain elevation | Open-Meteo |
+| Terrain hazard tiles | Mapzen terrain tiles on AWS |
+| D-ATIS | atis.info |
+| Live traffic (through the relay) | adsb.lol |
 | Base maps | CARTO and OpenStreetMap, USGS |
-| Map library | Leaflet (in `vendor/`) |
+| Map library | Leaflet (in `lib/`) |

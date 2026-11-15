@@ -246,3 +246,12 @@ progress { width: 100%; accent-color: var(--accent); }
   #print table.grid td, #print table.grid th { border: 1px solid #999; }
 }
 #print { display: none; }
+
+/* Marked positions, traffic */
+.chip.mark { background: #ffd166; }
+.mk.mark i { border-radius: 2px; border-color: #10161a; background: #ffd166; transform: rotate(45deg); width: 11px; height: 11px; left: -5.5px; top: -5.5px; }
+.mk.mark b { color: #ffd166; }
+.tfc { position: relative; pointer-events: none; }
+.tfc span { position: absolute; left: -9px; top: -9px; width: 18px; height: 18px; display: block; }
+.tfc svg { width: 18px; height: 18px; fill: #5fe0ff; stroke: #06212b; stroke-width: 1.2; }
+.tfc b { position: absolute; left: 11px; top: -11px; font-size: 10px; line-height: 1.15; font-weight: 700; white-space: nowrap; color: #c9f4ff; text-shadow: 0 0 2px #000, 0 0 2px #000, 0 0 3px #000; }

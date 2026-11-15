@@ -4,4 +4,9 @@ export const CONFIG = {
   // Used for the Dark and Light base maps. Without it, Dark falls back to a keyless Esri map.
   // This key travels with every tile request, so anyone who opens the site or the repo can read it.
   cartoKey: 'cb1_594r_1_b7421bfdc5e693f71913238e',
+
+  // Address of your relay server (see server/ and the README), for example
+  // 'https://kestrel-relay.yourname.workers.dev'. It turns on live traffic, NOTAMs and raw METAR/TAF text.
+  // Leave empty to run without them.
+  proxyUrl: '',
 };

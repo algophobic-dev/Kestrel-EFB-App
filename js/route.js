@@ -62,7 +62,9 @@ export function legsFor(points, ac, alt, wind) {
     d += dd; min += t; fuel += f;
     legs.push({ from: a, to: b, d: dd, tc, mc: norm(tc - mv), mh: norm(tc + wca * 180 / Math.PI - mv), wind: wind ? w : null, gs, min: t, fuel: f, cd: d, cmin: min, cfuel: fuel });
   }
-  return { legs, total: points.length > 1 ? { d, min, fuel, comp: wind ? ac.tas - d / (min / 60) : null } : null };
+  return { legs, total: points.length > 1 ? { d, min, fuel, comp: wind ? ac.tas - d / (min / 60) : null,
+    // Fuel required = trip + taxi + reserve at cruise burn.
+    taxi: ac.taxi ?? 1.5, reserve: (ac.reserve ?? 45) / 60 * ac.burn, req: fuel + (ac.taxi ?? 1.5) + (ac.reserve ?? 45) / 60 * ac.burn } : null };
 }
 
 export async function recompute() {

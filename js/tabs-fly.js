@@ -64,7 +64,11 @@ export const Flights = {
     const r = legsFor(points, ac, f.alt, w);
     nav.replaceChildren(navlogTable(r));
     sum.replaceChildren(...[kvRow('Route', f.text), kvRow('Distance', r.total ? r.total.d.toFixed(0) + ' nm' : '--'), kvRow('Time en route', r.total ? fmtDur(r.total.min) : '--'),
-      kvRow('Fuel', r.total ? `${r.total.fuel.toFixed(1)} gal of ${ac.fuelCap}` : '--', r.total && r.total.fuel > ac.fuelCap ? 'bad' : ''),
+      kvRow('Trip fuel', r.total ? `${r.total.fuel.toFixed(1)} gal` : '--'),
+      kvRow('Taxi + reserve', r.total ? `${r.total.taxi.toFixed(1)} + ${r.total.reserve.toFixed(1)} gal (${ac.reserve ?? 45} min)` : '--'),
+      kvRow('Fuel required', r.total ? `${r.total.req.toFixed(1)} gal of ${ac.fuelCap} usable` : '--', r.total && r.total.req > ac.fuelCap ? 'bad' : 'ok'),
+      r.total && (+f.loads.fuel || 0) < r.total.req ? kvRow('Fuel on board', `${+f.loads.fuel || 0} gal is ${(r.total.req - (+f.loads.fuel || 0)).toFixed(1)} gal short. Add fuel.`, 'bad') : null,
+      kvRow('Endurance on board', fmtDur((+f.loads.fuel || 0) / ac.burn * 60)),
       kvRow('Winds aloft', w ? 'Included' : 'Unavailable, still air used', w ? '' : 'warn'), errors.length ? kvRow('Problems', errors.join('; '), 'bad') : null,
       h('div', { class: 'note', style: 'margin-top:6px' }, 'Cruise speed and fuel burn only. Climb and descent are not modeled.')].filter(Boolean));
   },

@@ -1,6 +1,7 @@
 // Weather and terrain from free, keyless sources:
 // METAR/TAF/SIGMET: api.weather.gov (NWS) · winds aloft and elevation: open-meteo.com
 import { pressureLevel } from './geo.js';
+import { CONFIG } from './config.js';
 
 const NWS = 'https://api.weather.gov';
 const cache = new Map();
@@ -110,3 +111,21 @@ export async function elevations(points) {
   }
   return out;
 }
+
+// D-ATIS text for the airports that publish it (atis.info). Returns [] when there is none.
+export const datis = id => cached('d' + id, 5, async () => { const j = await (await fetch(`https://atis.info/api/${id}`)).json(); return Array.isArray(j) ? j : []; });
+
+// ---- Relay server (optional, see server/): raw METAR/TAF text and NOTAMs.
+const relay = () => CONFIG.proxyUrl.replace(/\/$/, '');
+export const hasRelay = () => !!CONFIG.proxyUrl;
+export const rawWx = id => cached('r' + id, 5, async () => {
+  const r = await fetch(`${relay()}/wx?ids=${id}`); if (!r.ok) throw new Error('Relay did not answer');
+  const t = await r.text(), i = t.indexOf('TAF ');
+  return { metar: (i < 0 ? t : t.slice(0, i)).replace(/^(METAR|SPECI) /, '').trim(), taf: i < 0 ? '' : t.slice(i).trim() };
+});
+export const notams = id => cached('n' + id, 10, async () => {
+  const r = await fetch(`${relay()}/notams?icao=${id}`), j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || 'NOTAMs did not load');
+  return j.items || [];
+});
+export const traffic = async (lat, lon, dist) => (await (await fetch(`${relay()}/traffic?lat=${lat.toFixed(3)}&lon=${lon.toFixed(3)}&dist=${Math.round(dist)}`)).json()).ac || [];
