@@ -70,7 +70,7 @@ export const Flights = {
       r.total && (+f.loads.fuel || 0) < r.total.req ? kvRow('Fuel on board', `${+f.loads.fuel || 0} gal is ${(r.total.req - (+f.loads.fuel || 0)).toFixed(1)} gal short. Add fuel.`, 'bad') : null,
       kvRow('Endurance on board', fmtDur((+f.loads.fuel || 0) / ac.burn * 60)),
       kvRow('Winds aloft', w ? 'Included' : 'Unavailable, still air used', w ? '' : 'warn'), errors.length ? kvRow('Problems', errors.join('; '), 'bad') : null,
-      h('div', { class: 'note', style: 'margin-top:6px' }, 'Cruise speed and fuel burn only. Climb and descent are not modeled.')].filter(Boolean));
+      h('div', { class: 'note', style: 'margin-top:6px' }, 'Climb and descent use the aircraft profile when its climb and descent fields are set. Wind is applied at cruise only.')].filter(Boolean));
   },
 };
 

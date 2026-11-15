@@ -8,5 +8,5 @@ export const CONFIG = {
   // Address of your relay server (see server/ and the README), for example
   // 'https://kestrel-relay.yourname.workers.dev'. It turns on live traffic, NOTAMs and raw METAR/TAF text.
   // Leave empty to run without them.
-  proxyUrl: '',
+  proxyUrl: 'https://kestrel-relay.kestrelefb.workers.dev',
 };

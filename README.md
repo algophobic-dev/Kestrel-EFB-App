@@ -9,7 +9,7 @@ A free flight-planning app for US pilots. It runs in the browser and installs on
 | Tab | Function |
 |---|---|
 | Maps | FAA VFR sectional, terminal, IFR low and high charts. Airports, navaids, fixes, Class B/C/D and special use airspace. Animated radar, flight category dots, SIGMETs, obstacles, terrain hazard coloring, live traffic (with the relay). Tap anywhere to add a point to the route or mark a position. GPS position and track log recording. |
-| Flight plan (FPL) | Type a route (`KLUK HYK V97 CVG KCVG`). Airways expand to their fixes. NavLog with winds aloft, heading, time and fuel. Profile view of terrain and airspace along the route. |
+| Flight plan (FPL) | Type a route (`KLUK HYK V97 CVG KCVG`). Airways, SIDs and STARs expand to their fixes (`KAPA WNGSS1 CHNGY ...`), or pick them with the Procedure button. Climb and descent are modeled from the aircraft profile. NavLog with winds aloft, heading, time and fuel. Profile view of terrain and airspace along the route. |
 | Airports | METAR, TAF, D-ATIS, runways with wind components, frequencies, NOTAMs (with the relay), a fuel price note and link. |
 | Plates | Current FAA approach plates, departures, arrivals and airport diagrams. Save an airport's plates for offline use. |
 | Imagery | Prog charts, surface analysis, radar, satellite, icing, winds aloft. |
@@ -17,7 +17,7 @@ A free flight-planning app for US pilots. It runs in the browser and installs on
 | ScratchPads, Checklist, Logbook, Documents | Handwritten notes with ATIS and CRAFT templates, checklists with speech, a logbook with CSV export, imported PDFs. |
 | More | Aircraft profiles, offline chart downloads, marked positions, imported map content (GeoJSON, KML), track logs with GPX export. |
 
-Not included: flight plan filing, synthetic vision, 3D view, geo-referenced plates, procedures by name, autorouting, takeoff and landing performance, climb and descent modeling. Coverage is the United States only.
+Not included: flight plan filing, synthetic vision, 3D view, geo-referenced plates, approach procedures by name, autorouting, takeoff and landing performance. Coverage is the United States only.
 
 ## Put it on GitHub
 
@@ -63,7 +63,17 @@ npx wrangler deploy
 3. Copy the address it prints (like `https://kestrel-relay.yourname.workers.dev`) into `proxyUrl` in `js/config.js`, then upload that file.
 4. In `server/wrangler.toml`, set `ALLOWED_ORIGINS` to your site's address so other sites cannot use your relay, then deploy again.
 
-Traffic and raw weather work as soon as the relay is deployed. NOTAMs also need an FAA key:
+Traffic and raw weather work as soon as the relay is deployed. NOTAMs also need a key, from either source.
+
+SkyLink API (skylinkapi.com): apply for the free trial (1,000 requests a month, personal use, reviewed within about a week), then store the key and deploy again:
+
+```bash
+npx wrangler secret put SKYLINK_API_KEY
+```
+
+If your SkyLink key comes from RapidAPI instead, store it as `RAPIDAPI_KEY`.
+
+Or the FAA, which requires a MyAccess identity check:
 
 1. Register at the FAA API portal (api.faa.gov) and request access to the NOTAM API. It is free; approval can take a few days.
 2. Store the two values the FAA gives you as secrets. They never go in the repository:

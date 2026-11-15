@@ -1,5 +1,6 @@
 // Flight plan panel: route chips, totals, NavLog table, terrain and airspace profile.
-import { $, $$, h, on, toast } from './util.js';
+import { $, $$, h, on, toast, modal } from './util.js';
+import { procs } from './db.js';
 import { plan, setPlan, removeToken, reverse, current, aircraft, flights } from './route.js';
 import { along, dist, fmtDur, pad3, inGeom } from './geo.js';
 import { elevations } from './wx.js';
@@ -35,6 +36,7 @@ function render(r) {
       else if (e.key === 'Backspace' && !input.value && r.chips.length) removeToken(r.chips[r.chips.length - 1].i);
     } });
   $('#fpl-chips').replaceChildren(...r.chips.map(c => h('span', { class: 'chip ' + (c.kind === 'apt' ? '' : c.kind), title: 'Remove ' + c.label, onclick: () => removeToken(c.i) }, c.label)), input);
+  if (document.activeElement !== $('#fpl-alt')) $('#fpl-alt').value = plan.alt;
   const t = r.total, ac = r.ac;
   const stat = (k, v, cls) => h('div', { class: 'stat' }, h('b', {}, k), h('span', { class: cls || '' }, v));
   const over = t && t.req > ac.fuelCap;
@@ -69,6 +71,7 @@ export function initFpl() {
   $('#fpl-alt').value = plan.alt; $('#fpl-alt').onchange = e => setPlan({ alt: Math.max(0, +e.target.value || 0) });
   $('#fpl-etd').value = plan.etd; $('#fpl-etd').onchange = e => setPlan({ etd: e.target.value });
   $('#fpl-reverse').onclick = reverse;
+  $('#fpl-proc').onclick = openProcs;
   $('#fpl-clear').onclick = () => setPlan({ text: '' });
   $('#fpl-save').onclick = () => {
     if (current.points.length < 2) return toast('Add at least two points before saving.');
@@ -135,7 +138,7 @@ async function drawProfile(r) {
   const oStrike = obs.filter(o => o.msl >= plan.alt).sort((a, b) => a.d - b.d)[0];
   const strike = tStrike && oStrike ? (tStrike.d < oStrike.d ? tStrike : oStrike) : tStrike || oStrike;
   const hiObs = obs.reduce((b, o) => !b || o.msl > b.msl ? o : b, null);
-  prof = { samples, spans, obs, total, alt: plan.alt, boxes: [], sel: null, dep: r.points[0].id, arr: r.points[r.points.length - 1].id };
+  prof = { samples, spans, obs, total, alt: plan.alt, toc: r.total.toc, tod: r.total.tod, e0: r.total.e0, e1: r.total.e1, boxes: [], sel: null, dep: r.points[0].id, arr: r.points[r.points.length - 1].id };
   const clr = plan.alt - hi.elev;
   info.replaceChildren(
     h('b', {}, 'Highest point'), h('span', {}, `${Math.round(hi.elev).toLocaleString()}' MSL`),
@@ -169,10 +172,36 @@ function paintProfile() {
   c.beginPath(); c.moveTo(X(0), H - B); samples.forEach(s => c.lineTo(X(s.d), Y(s.elev))); c.lineTo(X(total), H - B); c.closePath();
   c.fillStyle = '#8d8a73'; c.fill(); c.strokeStyle = '#c9c5a3'; c.lineWidth = 1; c.stroke();
   for (const o of prof.obs || []) { c.strokeStyle = o.msl > alt - 100 ? '#ef4444' : o.msl > alt - 1000 ? '#f2b134' : '#b9c3ca'; c.lineWidth = 1.5; c.beginPath(); c.moveTo(X(o.d), Y(o.msl - o.agl)); c.lineTo(X(o.d), Y(o.msl)); c.stroke(); }
-  c.strokeStyle = '#e23bf0'; c.lineWidth = 2.5; c.beginPath(); c.moveTo(X(0), Y(alt)); c.lineTo(X(total), Y(alt)); c.stroke();
+  c.strokeStyle = '#e23bf0'; c.lineWidth = 2.5; c.beginPath(); if (prof.toc != null) { c.moveTo(X(0), Y(prof.e0)); c.lineTo(X(prof.toc), Y(alt)); } else c.moveTo(X(0), Y(alt));
+  if (prof.tod != null) { c.lineTo(X(prof.tod), Y(alt)); c.lineTo(X(total), Y(prof.e1)); } else c.lineTo(X(total), Y(alt));
+  c.stroke();
   c.fillStyle = '#fff'; c.textAlign = 'left'; c.font = 'bold 12px system-ui, sans-serif';
   c.fillText(alt.toLocaleString() + "'", L + 4, Y(alt) - 9); c.fillText(prof.dep, L + 4, T - 8); c.textAlign = 'right'; c.fillText(prof.arr, W - R - 2, T - 8);
   const el = $('#prof-sel');
   if (el) el.textContent = prof.sel ? `${prof.sel.s.p.NAME} · ${altText(prof.sel.s.p.LOWER_VAL, prof.sel.s.p.LOWER_UOM, prof.sel.s.p.LOWER_CODE)} – ${altText(prof.sel.s.p.UPPER_VAL, prof.sel.s.p.UPPER_UOM, prof.sel.s.p.UPPER_CODE)}${prof.sel.s.p.CLASS?.length === 1 ? ', Class ' + prof.sel.s.p.CLASS : ''}` : 'Tap an airspace block.';
 }
 export { fitRoute };
+
+// ---------- SID and STAR picker
+async function openProcs() {
+  const pts = current.points, dep = pts[0], arr = pts.length > 1 ? pts[pts.length - 1] : null;
+  if (!dep || dep.kind !== 'apt') return toast('Start the route with a departure airport first.');
+  const D = (await procs(dep.id)).D || {}, E = arr && arr.kind === 'apt' ? (await procs(arr.id)).E || {} : {};
+  const pick = (map, cur) => {
+    const ps = h('select', {}, h('option', { value: '' }, Object.keys(map).length ? 'None' : 'None published'), Object.keys(map).sort().map(n => h('option', { value: n, selected: n === cur }, n)));
+    const ts = h('select', {});
+    const fill = () => ts.replaceChildren(h('option', { value: '' }, 'No transition'), ...Object.keys(map[ps.value]?.t || {}).sort().map(n => h('option', { value: n }, n)));
+    ps.onchange = fill; fill(); return { ps, ts };
+  };
+  const toks = plan.text.split(' ');
+  const d = pick(D, toks.find(x => D[x])), e = pick(E, toks.find(x => E[x]));
+  const f = (label, el) => h('label', { class: 'field' }, h('span', {}, label), el);
+  modal('Procedures', h('div', { class: 'form' },
+    f(`Departure from ${dep.id}`, d.ps), f('Transition', d.ts), f(arr && arr.kind === 'apt' ? `Arrival to ${arr.id}` : 'Arrival (add a destination airport)', e.ps), f('Transition', e.ts),
+    h('div', { class: 'note wide' }, 'Applying replaces any procedure already in the route. Runway-specific legs are not drawn.')), [{ label: 'Apply', run: () => {
+    const t = toks.filter(x => !D[x] && !E[x]);
+    if (d.ps.value) t.splice(1, 0, d.ps.value, ...(d.ts.value && !t.includes(d.ts.value) ? [d.ts.value] : []));
+    if (e.ps.value) t.splice(t.length - 1, 0, ...(e.ts.value && !t.includes(e.ts.value) ? [e.ts.value] : []), e.ps.value);
+    setPlan({ text: t.join(' ') }).then(r => { if (r.errors.length) toast(r.errors[0] + '.'); });
+  } }]);
+}

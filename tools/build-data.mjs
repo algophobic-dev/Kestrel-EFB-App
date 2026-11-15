@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // Rebuilds everything in /data from free public sources. No API keys.
 // Run every 28 days (FAA cycle):  node tools/build-data.mjs
-// Rebuild one part only:          node tools/build-data.mjs --only=airports   (airports | fixes | airways | plates)
-import { writeFile, mkdir } from 'node:fs/promises';
+// Rebuild one part only:          node tools/build-data.mjs --only=airports   (airports | fixes | airways | plates | procs)
+import { writeFile, readFile, mkdir } from 'node:fs/promises';
 import { gunzipSync } from 'node:zlib';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
@@ -163,5 +163,49 @@ if (want('plates')) try {
   for (const k of Object.keys(a)) if (k.length === 3 && a['K' + k] === a[k]) delete a[k];
   await save('plates.json', { cycle: hdr[1], from: hdr[2], to: hdr[3], a });
 } catch (e) { console.warn('plates failed:', e.message); }
+
+// ---- SIDs and STARs (FAA CIFP, ARINC 424). Needs the `unzip` command.
+if (want('procs')) try {
+  const { execFileSync } = await import('node:child_process');
+  const { tmpdir } = await import('node:os');
+  const base = Date.UTC(2025, 0, 23), day = 864e5, n = Math.floor((Date.now() - base) / (28 * day));
+  let zip;
+  for (const k of [n, n - 1]) {
+    const d = new Date(base + k * 28 * day), ymd = d.toISOString().slice(2, 10).replace(/-/g, '');
+    try { zip = await get(`https://aeronav.faa.gov/Upload_313-d/cifp/CIFP_${ymd}.zip`, 'buf', 1); break; } catch { }
+  }
+  if (!zip) throw new Error('no CIFP file');
+  const tmp = path.join(tmpdir(), 'kestrel-cifp.zip'); await writeFile(tmp, zip);
+  const text = execFileSync('unzip', ['-p', tmp, 'FAACIFP18'], { maxBuffer: 1 << 28 }).toString('latin1');
+  // Route type -> part: r = runway transition, c = common route, t = enroute transition.
+  const PART = { D: { 1: 'r', 4: 'r', F: 'r', T: 'r', 2: 'c', 5: 'c', M: 'c', 3: 't', 6: 't', S: 't', V: 't' },
+    E: { 1: 't', 4: 't', F: 't', 2: 'c', 5: 'c', 8: 'c', M: 'c', 3: 'r', 6: 'r', 9: 'r', S: 'r' } };
+  const procs = {}, lines = text.split('\n');
+  // The FAA map service misses many RNAV waypoints. Add every CIFP waypoint that fixes.json lacks.
+  const fixes = JSON.parse(await readFile(path.join(OUT, 'fixes.json'), 'utf8').catch(() => '[]'));
+  const have = new Set(fixes.map(f => f[0] + Math.round(f[1] * 10) + Math.round(f[2] * 10)));
+  const dms = (s, n) => (s[0] === 'S' || s[0] === 'W' ? -1 : 1) * (+s.slice(1, 1 + n) + +s.slice(1 + n, 3 + n) / 60 + +s.slice(3 + n) / 360000);
+  let added = 0;
+  for (const l of lines) {
+    if (l[0] !== 'S' || !((l[4] === 'E' && l[5] === 'A') || (l[4] === 'P' && l[12] === 'C'))) continue;
+    const id = l.slice(13, 18).trim(), la = l.slice(32, 41), lo = l.slice(41, 51);
+    if (!/^[A-Z]{5}$/.test(id) || !/^[NS]\d{8}$/.test(la) || !/^[EW]\d{9}$/.test(lo)) continue;
+    const lat = r5(dms(la, 2)), lon = r5(dms(lo, 3)), k = id + Math.round(lat * 10) + Math.round(lon * 10);
+    if (have.has(k) || !inUS(lat, lon)) continue;
+    have.add(k); fixes.push([id, lat, lon]); added++;
+  }
+  console.log('waypoints added from CIFP:', added);
+  await save('fixes.json', fixes);
+  for (const l of lines) {
+    if (l[0] !== 'S' || l[4] !== 'P' || (l[12] !== 'D' && l[12] !== 'E')) continue;
+    const apt = l.slice(6, 10).trim(), kind = l[12], name = l.slice(13, 19).trim(), part = PART[kind][l[19]];
+    const trans = l.slice(20, 25).trim(), fix = l.slice(29, 34).trim();
+    if (!part || !fix || /^RW\d/.test(fix) || fix === apt) continue;
+    const p = ((procs[apt] ||= {})[kind] ||= {})[name] ||= { r: {}, c: [], t: {} };
+    const list = part === 'c' ? p.c : (p[part][trans] ||= []);
+    if (list[list.length - 1] !== fix) list.push(fix);
+  }
+  await save('procs.json', procs);
+} catch (e) { console.warn('procedures failed:', e.message); }
 
 await save('meta.json', { built: new Date().toISOString() });

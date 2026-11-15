@@ -39,7 +39,13 @@ export const Airports = {
     const rwBox = h('div', {}, 'Loading'), fqBox = h('div', {}, 'Loading');
     const mv = magvar(a);
     const datisBox = h('pre', { class: 'raw' }), datisCard = card('D-ATIS', datisBox); datisCard.classList.add('hidden');
-    const notamBox = h('div', {}, hasRelay() ? 'Loading NOTAMs.' : h('div', { class: 'note' }, 'NOTAMs need the relay server. See the README to set it up, or search at faa.gov.'));
+    // Without a NOTAM key, hand off to the FAA's own search with the identifier already on the clipboard.
+    const notamId = a.wxId.length === 4 ? a.wxId : a.id;
+    const notamLink = () => h('div', {},
+      h('a', { class: 'btn sm primary', href: 'https://notams.aim.faa.gov/notamSearch/', target: '_blank', rel: 'noopener',
+        onclick: () => { navigator.clipboard?.writeText(notamId).then(() => toast(`${notamId} copied. Paste it into the FAA search box.`)).catch(() => { }); } }, `Open FAA NOTAM Search for ${notamId}`),
+      h('div', { class: 'note', style: 'margin-top:6px' }, `Copies ${notamId} so you only paste it and press Search.`));
+    const notamBox = h('div', {}, hasRelay() ? 'Loading NOTAMs.' : notamLink());
     const fuelNote = h('input', { type: 'text', placeholder: 'For example 100LL 6.45 self-serve', value: kv.get('fuelNotes', {})[a.id] || '', style: 'width:100%',
       onchange: e => { const n = kv.get('fuelNotes', {}); e.target.value.trim() ? n[a.id] = e.target.value.trim() : delete n[a.id]; kv.set('fuelNotes', n); toast('Fuel note saved on this device.'); } });
     let gotRaw = false;
@@ -53,7 +59,7 @@ export const Airports = {
         card('METAR', wxBox), card('TAF', tafBox), datisCard,
         card('Airport', kvRow('Type', a.typeName), kvRow('Elevation', `${a.elev.toLocaleString()}' MSL`), kvRow('Position', fmtLL(a.lat, a.lon)),
           kvRow('Variation', `${Math.abs(mv).toFixed(0)}°${mv >= 0 ? 'E' : 'W'}`), a.local && kvRow('FAA identifier', a.local),
-          h('div', { class: 'note', style: 'margin-top:6px' }, h('a', { href: 'https://notams.aim.faa.gov/notamSearch/', target: '_blank', rel: 'noopener' }, 'Search NOTAMs at faa.gov'))),
+          ),
         card('Runways', rwBox), card('Frequencies', fqBox),
         card('Fuel', h('label', { class: 'field' }, h('span', {}, 'Your price note'), fuelNote),
           h('div', { class: 'note', style: 'margin-top:6px' }, h('a', { href: `https://www.airnav.com/airport/${a.local || a.id}`, target: '_blank', rel: 'noopener' }, 'See fuel prices at airnav.com'))),
@@ -73,9 +79,9 @@ export const Airports = {
     }).catch(() => { });
     if (hasRelay()) {
       if (a.wx) rawWx(a.wxId).then(r => { if (this.cur !== cur) return; if (r.metar) { gotRaw = true; wxBox.textContent = r.metar; } if (r.taf) tafBox.textContent = r.taf; }).catch(() => { });
-      notams(a.wxId.length === 4 ? a.wxId : a.id).then(list => { if (this.cur !== cur) return;
+      notams(notamId).then(list => { if (this.cur !== cur) return;
         notamBox.replaceChildren(...(list.length ? list.map(n => h('pre', { class: 'raw', style: 'padding:6px 0;border-bottom:1px solid var(--line)' }, n.text)) : ['No NOTAMs for this airport.']));
-      }).catch(e => { if (this.cur === cur) notamBox.textContent = e.message + '.'; });
+      }).catch(() => { if (this.cur === cur) notamBox.replaceChildren(notamLink()); });
     }
     Promise.all([runways(a.id), wind]).then(([rw, m]) => {
       if (this.cur !== cur) return;

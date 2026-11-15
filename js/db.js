@@ -30,6 +30,7 @@ export async function load() {
 }
 export const part = name => lazy[name] ||= getJSON(name + '.json').catch(() => ({}));
 export const airport = id => byId.get(id) || byLocal.get(id) || byId.get('K' + id);
+export const procs = async id => (await part('procs'))[id] || {};
 export const runways = async id => (await part('runways'))[id] || [];
 export const freqs = async id => (await part('freqs'))[id] || [];
 export async function plates(id) {

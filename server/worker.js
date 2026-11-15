@@ -2,7 +2,8 @@
 // It fetches three things a browser cannot fetch directly, and keeps the FAA NOTAM key secret.
 //   GET /wx?ids=KLEX            raw METAR and TAF text (aviationweather.gov)
 //   GET /traffic?lat=&lon=&dist= live ADS-B traffic within dist nm (adsb.lol)
-//   GET /notams?icao=KLEX       NOTAMs (FAA NOTAM API; needs FAA_CLIENT_ID and FAA_CLIENT_SECRET secrets)
+//   GET /notams?icao=KLEX       NOTAMs. Needs one secret set: SKYLINK_API_KEY (skylinkapi.com) or RAPIDAPI_KEY (SkyLink on RapidAPI),
+//                               or FAA_CLIENT_ID and FAA_CLIENT_SECRET (FAA NOTAM API)
 
 const json = (body, status, headers, maxAge = 0) => new Response(JSON.stringify(body), {
   status, headers: { ...headers, 'Content-Type': 'application/json', 'Cache-Control': maxAge ? `public, max-age=${maxAge}` : 'no-store' },
@@ -40,16 +41,27 @@ export default {
       if (url.pathname === '/notams') {
         const icao = (q.get('icao') || '').toUpperCase();
         if (!/^[A-Z0-9]{3,4}$/.test(icao)) return json({ error: 'Bad icao' }, 400, cors);
-        if (!env.FAA_CLIENT_ID || !env.FAA_CLIENT_SECRET) return json({ error: 'The relay has no FAA NOTAM key yet. Add FAA_CLIENT_ID and FAA_CLIENT_SECRET.' }, 501, cors);
-        const r = await fetch(`https://external-api.faa.gov/notamapi/v1/notams?icaoLocation=${icao}&pageSize=200`, { headers: { client_id: env.FAA_CLIENT_ID, client_secret: env.FAA_CLIENT_SECRET } });
-        if (!r.ok) return json({ error: `FAA NOTAM API answered ${r.status}` }, 502, cors);
-        const d = await r.json();
-        const items = (d.items || []).map(i => {
-          const core = i.properties?.coreNOTAMData || {}, n = core.notam || {};
-          const tr = (core.notamTranslation || [])[0] || {};
-          return { id: n.number || n.id || '', text: n.text || tr.formattedText || tr.simpleText || '', start: n.effectiveStart || '', end: n.effectiveEnd || '', cls: n.classification || '' };
-        }).filter(n => n.text);
-        return json({ items }, 200, cors, 300);
+        // Results are kept for 30 minutes so a small monthly quota lasts.
+        const cacheKey = new Request(`${url.origin}/notams-cache/${icao}`), hit = await caches.default.match(cacheKey);
+        if (hit) return json(await hit.json(), 200, cors, 600);
+        let items;
+        if (env.SKYLINK_API_KEY || env.RAPIDAPI_KEY) {
+          // SkyLink sells the same data directly and through RapidAPI; only the address and header differ.
+          const r = env.SKYLINK_API_KEY
+            ? await fetch(`https://data.skylinkapi.com/v3.1/notams/${icao}`, { headers: { 'x-api-key': env.SKYLINK_API_KEY } })
+            : await fetch(`https://skylink-api.p.rapidapi.com/notams/${icao}`, { headers: { 'X-RapidAPI-Key': env.RAPIDAPI_KEY, 'X-RapidAPI-Host': 'skylink-api.p.rapidapi.com' } });
+          if (!r.ok) return json({ error: r.status === 429 ? 'The NOTAM quota is used up for now' : `SkyLink answered ${r.status}` }, 502, cors);
+          items = ((await r.json()).notams || []).map(n => ({ id: n.notam_id || '', text: n.raw || n.body || '', start: n.effective || '', end: n.expiration || '', cls: n.scope || '' })).filter(n => n.text);
+        } else if (env.FAA_CLIENT_ID && env.FAA_CLIENT_SECRET) {
+          const r = await fetch(`https://external-api.faa.gov/notamapi/v1/notams?icaoLocation=${icao}&pageSize=200`, { headers: { client_id: env.FAA_CLIENT_ID, client_secret: env.FAA_CLIENT_SECRET } });
+          if (!r.ok) return json({ error: `FAA NOTAM API answered ${r.status}` }, 502, cors);
+          items = ((await r.json()).items || []).map(i => {
+            const core = i.properties?.coreNOTAMData || {}, n = core.notam || {}, tr = (core.notamTranslation || [])[0] || {};
+            return { id: n.number || n.id || '', text: n.text || tr.formattedText || tr.simpleText || '', start: n.effectiveStart || '', end: n.effectiveEnd || '', cls: n.classification || '' };
+          }).filter(n => n.text);
+        } else return json({ error: 'The relay has no NOTAM key yet. Add SKYLINK_API_KEY or RAPIDAPI_KEY, or FAA_CLIENT_ID and FAA_CLIENT_SECRET' }, 501, cors);
+        await caches.default.put(cacheKey, new Response(JSON.stringify({ items }), { headers: { 'Content-Type': 'application/json', 'Cache-Control': 'public, max-age=1800' } }));
+        return json({ items }, 200, cors, 600);
       }
     } catch (e) {
       return json({ error: 'Relay error: ' + e.message }, 502, cors);
