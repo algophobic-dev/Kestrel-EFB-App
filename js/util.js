@@ -34,7 +34,9 @@ export const emit = (name, detail) => bus.dispatchEvent(new CustomEvent(name, { 
 const P = 'kestrel.';
 export const kv = {
   get(k, d) { try { const v = localStorage.getItem(P + k); return v == null ? d : JSON.parse(v); } catch { return d; } },
-  set(k, v) { try { localStorage.setItem(P + k, JSON.stringify(v)); } catch { toast('Storage is full. Delete some saved items.'); } },
+  set(k, v) { kv.setQuiet(k, v); kv.changed?.(k); },
+  // Save without telling sync (used for sync's own bookkeeping and for values that arrive from another device).
+  setQuiet(k, v) { try { localStorage.setItem(P + k, JSON.stringify(v)); } catch { toast('Storage is full. Delete some saved items.'); } },
 };
 
 // ---- blobs (IndexedDB)

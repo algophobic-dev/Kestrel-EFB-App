@@ -4,6 +4,7 @@ import { aircraft } from './route.js';
 import { part, marks } from './db.js';
 import { BASES, CHARTS, mapView, showTrack, flyTo } from './map.js';
 import { fmtDur, fmtLL } from './geo.js';
+import { syncCode, syncState, newCode, validCode, link, unlink, sync, deleteServerCopy } from './sync.js';
 
 const card = (title, ...kids) => h('div', { class: 'card' }, h('h3', {}, title), kids);
 const field = (label, input, cls) => h('label', { class: 'field ' + (cls || '') }, h('span', {}, label), input);
@@ -21,10 +22,12 @@ function tileUrls(layer, b, z0, z1) {
 export const More = {
   init(view) {
     this.detail = h('div', { class: 'pane-detail' });
-    const items = [['Aircraft', () => this.aircraft()], ['Downloads', () => this.downloads()], ['Marked positions', () => this.marks()], ['Map content', () => this.content()], ['Track logs', () => this.tracks()], ['About', () => this.about()]];
+    const items = [['Aircraft', () => this.aircraft()], ['Sync', () => this.sync()], ['Downloads', () => this.downloads()], ['Marked positions', () => this.marks()], ['Map content', () => this.content()], ['Track logs', () => this.tracks()], ['About', () => this.about()]];
     this.list = h('div', { class: 'list' }, items.map(([n, fn]) => h('button', { class: 'row', onclick: e => { this.list.querySelectorAll('.sel').forEach(x => x.classList.remove('sel')); e.currentTarget.classList.add('sel'); this.sp.showDetail(); fn(); } }, h('div', { class: 'grow' }, h('div', { class: 't', style: 'font-weight:600' }, n)))));
     this.sp = split(view, h('div', { class: 'pane-list' }, h('div', { class: 'pane-head' }, h('h2', {}, 'More')), this.list), this.detail);
     on('tracks', () => this.section === 'tracks' && this.tracks());
+    on('sync', () => this.section === 'sync' && this.sync());
+    on('synced', () => this.section === 'aircraft' && this.aircraft());
     on('marks', () => this.section === 'marks' && this.marks());
     this.about();
   },
@@ -113,6 +116,41 @@ export const More = {
           h('button', { class: 'btn sm', onclick: () => download(`track-${new Date(t.start).toISOString().slice(0, 10)}.gpx`, gpx(t), 'application/gpx+xml') }, 'Export GPX'),
           h('button', { class: 'btn sm danger', onclick: () => confirmDel('this track log', () => { kv.set('tracks', kv.get('tracks', []).filter(x => x.id !== t.id)); this.tracks(); }) }, 'Delete')))))
         : h('div', { class: 'empty' }, 'No track logs. On the Maps tab, select REC to record your flight.')));
+  },
+
+  // ----- Sync
+  sync() {
+    this.section = 'sync';
+    const code = syncCode(), st = syncState();
+    const what = 'Aircraft, flights, logbook, checklists, marked positions and fuel notes sync. Documents, downloaded charts, saved plates, ScratchPads and track logs stay on each device.';
+    if (!code) {
+      const inp = h('input', { type: 'text', placeholder: 'XXXX-XXXX-XXXX-XXXX-XXXX-XXXX', autocapitalize: 'characters', spellcheck: 'false', style: 'width:100%;text-transform:uppercase;font-family:var(--mono)' });
+      const go = async (c, isNew, btn) => { btn.disabled = true; const s = await link(c, isNew); if (s.error) { unlink(); toast(s.error + '.'); btn.disabled = false; } else toast(isNew ? 'Sync is on. Enter this code on your other devices.' : 'This device is linked.'); };
+      this.detail.replaceChildren(h('div', { class: 'pad' }, this.head('Sync'),
+        h('div', { class: 'cards' },
+          card('Start syncing', h('p', { class: 'note', style: 'margin-top:0' }, 'Create a private code, then enter it on your other devices. No email or password.'),
+            h('button', { class: 'btn primary', onclick: e => go(newCode(), true, e.currentTarget) }, 'Create a sync code')),
+          card('Link to another device', field('Code from your other device', inp),
+            h('div', { class: 'bar', style: 'margin-top:8px' }, h('button', { class: 'btn', onclick: e => { const c = inp.value.trim().toUpperCase(); validCode(c) ? go(c, false, e.currentTarget) : toast('Enter the code as six groups of four, like ABCD-EFGH-JKLM-NPQR-STUV-WXYZ.'); } }, 'Link this device')),
+            h('p', { class: 'note' }, 'Linking replaces this device’s synced items with the copy from your other devices.'))),
+        h('p', { class: 'note' }, what)));
+      return;
+    }
+    const shown = h('div', { class: 'mono', style: 'font-size:15px;font-weight:700;letter-spacing:.04em;word-break:break-all' }, '••••-••••-••••-••••-••••-••••');
+    this.detail.replaceChildren(h('div', { class: 'pad' }, this.head('Sync', h('button', { class: 'btn sm primary', onclick: async e => { e.currentTarget.disabled = true; await sync(); } }, 'Sync now')),
+      h('div', { class: 'cards' },
+        card('Status', h('div', { class: 'kv' }, h('span', {}, 'Last synced'), h('span', {}, st.at ? new Date(st.at).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : 'Not yet')),
+          st.error ? h('div', { class: 'kv' }, h('span', {}, 'Problem'), h('span', { class: 'bad' }, st.error)) : h('div', { class: 'kv' }, h('span', {}, 'State'), h('span', { class: 'ok' }, 'Up to date'))),
+        card('Your sync code', shown,
+          h('div', { class: 'bar', style: 'margin-top:8px' },
+            h('button', { class: 'btn sm', onclick: e => { const on = shown.textContent !== code; shown.textContent = on ? code : '••••-••••-••••-••••-••••-••••'; e.currentTarget.textContent = on ? 'Hide code' : 'Show code'; } }, 'Show code'),
+            h('button', { class: 'btn sm', onclick: () => navigator.clipboard?.writeText(code).then(() => toast('Code copied.')).catch(() => toast('Copy did not work. Select Show code and type it.')) }, 'Copy code')),
+          h('p', { class: 'note' }, 'Anyone with this code can read and change your synced data. Keep it private. It cannot be recovered if you lose it on every device.')),
+        card('Stop syncing',
+          h('div', { class: 'bar' },
+            h('button', { class: 'btn sm', onclick: () => { unlink(); toast('This device is unlinked. Its data stays here.'); } }, 'Unlink this device'),
+            h('button', { class: 'btn sm danger', onclick: () => modal('Delete the synced copy?', h('div', {}, 'This deletes the copy on the relay and unlinks this device. Data on your devices stays. You cannot undo this.'), [{ label: 'Delete', danger: true, run: async () => { try { await deleteServerCopy(); unlink(); toast('Synced copy deleted.'); } catch (e) { toast(e.message + '.'); return false; } } }]) }, 'Delete synced copy')))),
+      h('p', { class: 'note' }, what + ' When two devices change the same item, the most recent change wins.')));
   },
 
   // ----- Marked positions

@@ -87,7 +87,7 @@ export const Flights = {
 // ---------- Logbook
 const LOG_FIELDS = [['date', 'Date', 'date'], ['ac', 'Aircraft', 'text'], ['from', 'From', 'text'], ['to', 'To', 'text'], ['total', 'Total time', 'number'], ['pic', 'PIC', 'number'], ['night', 'Night', 'number'], ['inst', 'Instrument', 'number'], ['xc', 'Cross country', 'number'], ['ldg', 'Landings', 'number']];
 export const Logbook = {
-  init(view) { this.view = view; on('tracks', () => this.draw()); this.draw(); },
+  init(view) { this.view = view; on('tracks', () => this.draw()); on('synced', () => this.draw()); this.draw(); },
   edit(entry) {
     const e = entry ? { ...entry } : { id: uid(), date: new Date().toISOString().slice(0, 10), ac: aircraft.get(plan.acId).tail || '' };
     const form = h('div', { class: 'form' }, LOG_FIELDS.map(([k, label, type]) => field(label, h('input', { type, step: type === 'number' ? (k === 'ldg' ? 1 : .1) : null, min: 0, value: e[k] ?? '', oninput: ev => e[k] = type === 'number' ? +ev.target.value : ev.target.value.toUpperCase() }))),

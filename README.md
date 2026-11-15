@@ -83,6 +83,18 @@ npx wrangler secret put FAA_CLIENT_ID
 npx wrangler secret put FAA_CLIENT_SECRET
 ```
 
+## Device sync (optional)
+
+Sync keeps aircraft, flights, logbook, checklists, marked positions and fuel notes the same on all your devices, using a private code instead of an account. It stores the data in a free Cloudflare KV namespace on the relay. Create the namespace once, answer yes when Wrangler offers to add it to `wrangler.toml`, then deploy:
+
+```bash
+cd server
+npx wrangler kv namespace create SYNC
+npx wrangler deploy
+```
+
+Then open More > Sync in the app and select Create a sync code.
+
 ## Map key
 
 `js/config.js` holds a CARTO basemaps key for the Dark and Light base maps. The key is sent with every tile request, so anyone who opens the site or the repository can read it. Leave it empty to use the keyless fallback maps. The Topographic and Satellite base maps and all FAA charts need no key and can be downloaded for offline use.

@@ -7,6 +7,7 @@ import { recompute } from './route.js';
 import { Airports, Plates, Imagery, Documents } from './tabs-ref.js';
 import { Flights, Logbook, Checklist, Scratch } from './tabs-fly.js';
 import { More } from './more.js';
+import { initSync } from './sync.js';
 
 const TABS = [
   ['airports', 'Airports', Airports], ['maps', 'Maps', null], ['plates', 'Plates', Plates], ['documents', 'Documents', Documents], ['imagery', 'Imagery', Imagery],
@@ -29,7 +30,7 @@ on('open-plates', id => { show('plates'); Plates.open(id); });
 (async () => {
   show('maps');
   try { await load(); } catch { toast('Navigation data did not load. Reload the page.'); return; }
-  initMap(); initFpl(); await recompute();
+  initMap(); initFpl(); await recompute(); initSync();
   const last = kv.get('tab', 'maps'); if (last !== 'maps') show(last);
   if (!kv.get('ack')) {
     const { modal } = await import('./util.js');
