@@ -25,13 +25,13 @@ static class Program
 
 sealed class MainForm : Form
 {
-    const string Site = "https://algophobic-dev.github.io/Kestrel-EFB/";
+    const string SiteUrl = "https://algophobic-dev.github.io/Kestrel-EFB/";
     const string Help = "https://github.com/algophobic-dev/Kestrel-EFB#readme";
     const string OfflinePage =
         "<html><body style=\"margin:0;height:100vh;display:grid;place-items:center;background:#10161a;color:#eef3f6;font:15px Segoe UI,sans-serif;text-align:center\">" +
         "<div><h2 style=\"margin:0 0 8px\">Kestrel EFB could not load</h2>" +
         "<p style=\"color:#93a3ae;margin:0 0 16px\">Check your internet connection, then select Reload.</p>" +
-        "<a href=\"" + Site + "\" style=\"background:#2bb3a0;color:#06211d;padding:8px 16px;border-radius:6px;font-weight:600;text-decoration:none\">Reload</a></div></body></html>";
+        "<a href=\"" + SiteUrl + "\" style=\"background:#2bb3a0;color:#06211d;padding:8px 16px;border-radius:6px;font-weight:600;text-decoration:none\">Reload</a></div></body></html>";
 
     readonly WebView2 web = new WebView2 { Dock = DockStyle.Fill };
     readonly Dictionary<Keys, ToolStripMenuItem> shortcuts = new Dictionary<Keys, ToolStripMenuItem>();
@@ -83,7 +83,7 @@ sealed class MainForm : Form
             Uri uri;
             if (!Uri.TryCreate(e.Uri, UriKind.Absolute, out uri)) return;
             bool isWeb = uri.Scheme == "http" || uri.Scheme == "https";
-            if (isWeb && !string.Equals(uri.Host, new Uri(Site).Host, StringComparison.OrdinalIgnoreCase)) { e.Cancel = true; OpenExternal(e.Uri); }
+            if (isWeb && !string.Equals(uri.Host, new Uri(SiteUrl).Host, StringComparison.OrdinalIgnoreCase)) { e.Cancel = true; OpenExternal(e.Uri); }
         };
         core.NavigationCompleted += (s, e) =>
         {
@@ -96,7 +96,7 @@ sealed class MainForm : Form
             ToolStripMenuItem item;
             if (shortcuts.TryGetValue(e.KeyData, out item)) { item.PerformClick(); e.Handled = true; e.SuppressKeyPress = true; }
         };
-        core.Navigate(Site);
+        core.Navigate(SiteUrl);
     }
 
     static void OpenExternal(string url)
@@ -211,7 +211,7 @@ sealed class MainForm : Form
     void Reload()
     {
         if (web.CoreWebView2 == null) return;
-        if (web.Source != null && web.Source.Scheme.StartsWith("http")) web.CoreWebView2.Reload(); else web.CoreWebView2.Navigate(Site);
+        if (web.Source != null && web.Source.Scheme.StartsWith("http")) web.CoreWebView2.Reload(); else web.CoreWebView2.Navigate(SiteUrl);
     }
 
     void ToggleFullScreen()
