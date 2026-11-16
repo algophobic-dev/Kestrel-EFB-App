@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Kestrel EFB for Windows. Built on GitHub by .github/workflows/windows.yml into one self-contained .exe. -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <Nullable>disable</Nullable>
+    <AssemblyName>Kestrel-EFB</AssemblyName>
+    <RootNamespace>KestrelEFB</RootNamespace>
+    <ApplicationIcon>app.ico</ApplicationIcon>
+    <Product>Kestrel EFB</Product>
+    <Description>Free flight planning for US pilots.</Description>
+    <Version>1.0.0</Version>
+
+    <!-- One .exe that needs no .NET install on the user's PC. -->
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>true</SelfContained>
+    <PublishSingleFile>true</PublishSingleFile>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <DebugType>none</DebugType>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.2903.40" />
+  </ItemGroup>
+
+</Project>

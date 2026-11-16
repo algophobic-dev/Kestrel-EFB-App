@@ -50,6 +50,12 @@ The app loads the live site, so it needs a connection and always shows the lates
 bash mac/build.sh
 ```
 
+## Windows app
+
+`Kestrel-EFB.exe` on the Releases page is a native Windows app: the same app in its own window, with a menu bar and keyboard shortcuts. It is one file with nothing to install; double-click it. It needs Windows 10 or 11 (64-bit) and a connection. The first time, Windows SmartScreen may warn that it is from an unknown publisher: select More info, then Run anyway.
+
+The source is in `windows/`. GitHub builds it: open the Actions tab, select Build Windows app, and choose Run workflow. It also runs whenever a release is published.
+
 ## Keep the data current
 
 Navigation data and the plates index follow the FAA 28-day cycle. To refresh them:
