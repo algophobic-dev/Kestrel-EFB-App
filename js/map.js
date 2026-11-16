@@ -75,6 +75,10 @@ function applyTiles() {
   chartL = c?.url ? L.tileLayer(c.url, { minNativeZoom: c.min, maxNativeZoom: c.max, minZoom: c.min - 1, maxZoom: 18, attribution: 'FAA charts' }).addTo(map) : null;
   $('#layer-label').textContent = c?.url ? c.name : b.name + ' map';
 }
+// Used by the Mac app's menus.
+export function setOverlay(key, on) { st.ov[key] = on ?? !st.ov[key]; save(); applyOverlays(); }
+export function setChart(key) { if (CHARTS[key]) { st.chart = key; save(); applyTiles(); } }
+export function setBase(key) { if (BASES[key]) { st.base = key; save(); applyTiles(); } }
 function applyOverlays() {
   radarL?.remove(); radarL = null;
   $('#timebar').classList.toggle('hidden', !st.ov.radar);

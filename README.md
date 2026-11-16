@@ -37,6 +37,19 @@ python3 -m http.server 8765
 
 Then open `http://localhost:8765`.
 
+## Mac app
+
+`mac/Kestrel-EFB.dmg` is a native Mac app: the same app in its own window, with a menu bar (File, View, Map, Flight) and keyboard shortcuts. It runs on Apple silicon and Intel Macs with macOS 12 or later.
+
+1. Open the DMG and drag Kestrel EFB to Applications.
+2. The first time, right-click the app and choose Open. It is not notarized by Apple, so a plain double-click is blocked on other Macs.
+
+The app loads the live site, so it needs a connection and always shows the latest version. To rebuild it after changing `mac/main.swift`:
+
+```bash
+bash mac/build.sh
+```
+
 ## Keep the data current
 
 Navigation data and the plates index follow the FAA 28-day cycle. To refresh them:

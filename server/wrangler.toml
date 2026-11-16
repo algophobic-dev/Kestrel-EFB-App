@@ -5,3 +5,8 @@ compatibility_date = "2026-01-01"
 [vars]
 # Sites allowed to use this relay, comma separated. Use your GitHub Pages address.
 ALLOWED_ORIGINS = "https://algophobic-dev.github.io,http://localhost:8765"
+
+# Storage for device sync (More > Sync in the app).
+[[kv_namespaces]]
+binding = "SYNC"
+id = "af738d2b35534623b0aed8be851bf977"

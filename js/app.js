@@ -8,6 +8,7 @@ import { Airports, Plates, Imagery, Documents } from './tabs-ref.js';
 import { Flights, Logbook, Checklist, Scratch } from './tabs-fly.js';
 import { More } from './more.js';
 import { initSync } from './sync.js';
+import './desktop.js';
 
 const TABS = [
   ['airports', 'Airports', Airports], ['maps', 'Maps', null], ['plates', 'Plates', Plates], ['documents', 'Documents', Documents], ['imagery', 'Imagery', Imagery],
