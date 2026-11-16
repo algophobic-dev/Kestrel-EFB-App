@@ -33,10 +33,6 @@ on('open-plates', id => { show('plates'); Plates.open(id); });
   try { await load(); } catch { toast('Navigation data did not load. Reload the page.'); return; }
   initMap(); initFpl(); await recompute(); initSync();
   const last = kv.get('tab', 'maps'); if (last !== 'maps') show(last);
-  if (!kv.get('ack')) {
-    const { modal } = await import('./util.js');
-    modal('Planning only', h('div', {}, 'Kestrel EFB is not approved for navigation. Check all data against official sources before you fly.'), [{ label: 'I understand', run: () => kv.set('ack', 1) }]);
-  }
 })();
 
 if ('serviceWorker' in navigator && location.protocol === 'https:' || location.hostname === 'localhost') navigator.serviceWorker?.register('sw.js').catch(() => { });

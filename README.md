@@ -2,7 +2,7 @@
 
 A free flight-planning app for US pilots. It runs in the browser and installs on Mac, Windows, iPad and iPhone.
 
-**Planning only. Not approved for navigation.** Check every route, chart, weather report and NOTAM against official sources before you fly.
+Provided as is, with no warranty. Data comes from public sources and is not verified.
 
 ## What it does
 

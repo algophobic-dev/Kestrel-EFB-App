@@ -35,7 +35,7 @@ window.Kestrel = {
     if (current.legs.length < 1) { toast('Enter a route with at least two points to print a NavLog.'); return false; }
     $('#print')?.remove();
     const pts = current.points;
-    document.body.append(h('div', { id: 'print' }, h('h2', {}, `NavLog · ${pts[0].id} to ${pts[pts.length - 1].id} · ${current.ac.name} · ${plan.alt.toLocaleString()}'`), navlogTable(current), h('p', {}, 'Planning only. Not for navigation.')));
+    document.body.append(h('div', { id: 'print' }, h('h2', {}, `NavLog · ${pts[0].id} to ${pts[pts.length - 1].id} · ${current.ac.name} · ${plan.alt.toLocaleString()}'`), navlogTable(current)));
     return true;
   },
 };

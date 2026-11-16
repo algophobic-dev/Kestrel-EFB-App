@@ -1,7 +1,7 @@
 {
   "name": "Kestrel EFB",
   "short_name": "Kestrel",
-  "description": "Free flight planning: charts, weather, routes, plates. Not for navigation.",
+  "description": "Free flight planning: charts, weather, routes, plates.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

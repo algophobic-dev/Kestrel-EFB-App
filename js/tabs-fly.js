@@ -12,7 +12,7 @@ const kvRow = (k, v, cls) => h('div', { class: 'kv' }, h('span', {}, k), h('span
 const field = (label, input, cls) => h('label', { class: 'field ' + (cls || '') }, h('span', {}, label), input);
 function printNode(title, node) {
   $('#print')?.remove();
-  document.body.append(h('div', { id: 'print' }, h('h2', {}, title), node, h('p', {}, 'Planning only. Not for navigation.')));
+  document.body.append(h('div', { id: 'print' }, h('h2', {}, title), node));
   window.print();
 }
 

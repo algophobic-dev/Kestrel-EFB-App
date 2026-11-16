@@ -16,6 +16,6 @@
   <key>NSPrincipalClass</key><string>NSApplication</string>
   <key>NSLocationUsageDescription</key><string>Kestrel EFB shows your position on the map and records track logs.</string>
   <key>NSLocationWhenInUseUsageDescription</key><string>Kestrel EFB shows your position on the map and records track logs.</string>
-  <key>NSHumanReadableCopyright</key><string>Planning only. Not for navigation.</string>
+  <key>NSHumanReadableCopyright</key><string>Free flight planning for US pilots.</string>
 </dict>
 </plist>

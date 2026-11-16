@@ -40,7 +40,7 @@ const mk = (p, cls, label) => L.marker([p.lat, p.lon], { interactive: false, key
 
 export function initMap() {
   map = L.map('map', { zoomControl: false, attributionControl: true, minZoom: 3, maxZoom: 18, worldCopyJump: true, zoomSnap: .5 }).setView(st.c, st.z);
-  map.attributionControl.setPrefix('Not for navigation');
+  map.attributionControl.setPrefix(false);
   canvas = L.canvas({ padding: .3 });
   map.createPane('wx').style.zIndex = 350;
   airspaceL = L.layerGroup().addTo(map); sigmetL = L.layerGroup().addTo(map);
