@@ -2,6 +2,7 @@
 import { $, $$, h, on, toast, modal } from './util.js';
 import { procs } from './db.js';
 import { autoroute } from './autoroute.js';
+import { openExport } from './export.js';
 import { init3d, draw3d } from './view3d.js';
 import { plan, setPlan, removeToken, reverse, current, aircraft, flights } from './route.js';
 import { along, dist, fmtDur, pad3, inGeom } from './geo.js';
@@ -77,6 +78,7 @@ export function initFpl() {
   $('#fpl-reverse').onclick = reverse;
   $('#fpl-proc').onclick = openProcs;
   $('#fpl-routes').onclick = openRoutes;
+  $('#fpl-export').onclick = openExport;
   $('#fpl-clear').onclick = () => setPlan({ text: '' });
   $('#fpl-save').onclick = () => {
     if (current.points.length < 2) return toast('Add at least two points before saving.');
