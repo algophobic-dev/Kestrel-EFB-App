@@ -197,7 +197,7 @@ sealed class MainForm : Form
 
         strip.Items.Add(Menu("&Help",
             Item("Kestrel EFB &Help", () => OpenExternal(Help), Keys.F1),
-            Item("&About Kestrel EFB", () => MessageBox.Show(this, "Kestrel EFB 1.1\nFree flight planning for US pilots.", "About Kestrel EFB", MessageBoxButtons.OK, MessageBoxIcon.Information))));
+            Item("&About Kestrel EFB", () => MessageBox.Show(this, "Kestrel EFB 1.1\nFree flight planning for pilots.", "About Kestrel EFB", MessageBoxButtons.OK, MessageBoxIcon.Information))));
         return strip;
     }
 

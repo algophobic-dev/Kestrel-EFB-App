@@ -1,6 +1,6 @@
 # Kestrel EFB
 
-A free flight-planning app for US pilots. It runs in the browser and installs on Mac, Windows, iPad and iPhone.
+A free flight-planning app for pilots, with airports and weather worldwide. It runs in the browser and installs on Mac, Windows, iPad and iPhone.
 
 - Website: https://algophobic-dev.github.io/Kestrel-EFB/
 - App: https://algophobic-dev.github.io/Kestrel-EFB-App/
@@ -11,7 +11,7 @@ Provided as is, with no warranty. Data comes from public sources and is not veri
 
 | Tab | Function |
 |---|---|
-| Maps | FAA VFR sectional, terminal, IFR low and high charts. Airports, navaids, fixes, Class B/C/D and special use airspace. Animated radar, flight category dots, SIGMETs, obstacles, terrain hazard coloring, runway and taxiway charts when zoomed in, and with the relay live traffic and icing, turbulence and IFR advisories. Tap anywhere to add a point to the route or mark a position. GPS position and track log recording. |
+| Maps | FAA VFR sectional, terminal, IFR low and high charts, and open flightmaps VFR charts for about 20 countries in Europe and southern Africa. Airports, navaids, fixes, Class B/C/D and special use airspace, and with the relay world airspace from OpenAIP. Animated radar (worldwide outside the US at lower detail), flight category dots, SIGMETs, obstacles, terrain hazard coloring, runway and taxiway charts when zoomed in, and with the relay live traffic and icing, turbulence and IFR advisories. Tap anywhere to add a point to the route or mark a position. GPS position and track log recording. |
 | Flight plan (FPL) | Type a route (`KLUK HYK V97 CVG KCVG`). Airways, SIDs, STARs and approaches expand to their fixes (`KAPA WNGSS1 CHNGY ...`), or pick them with the Procedure button. Climb and descent are modeled from the aircraft profile. The Routes button suggests airway routes. The 3D view flies the route over terrain. NavLog with winds aloft, heading, time and fuel. Profile view of terrain and airspace along the route. |
 | Airports | METAR, TAF, D-ATIS, runways with wind components, frequencies, NOTAMs (with the relay), a fuel price note and link. |
 | Plates | Current FAA approach plates, departures, arrivals and airport diagrams. Save an airport's plates for offline use. Show on map places an approach plate on the map (with the relay). |
@@ -20,7 +20,9 @@ Provided as is, with no warranty. Data comes from public sources and is not veri
 | ScratchPads, Checklist, Logbook, Documents | Handwritten notes with ATIS and CRAFT templates, checklists with speech, a logbook with CSV export, imported PDFs. |
 | More | Aircraft profiles, offline chart downloads, marked positions, imported map content (GeoJSON, KML), track logs with GPX export. |
 
-Not included: flight plan filing. Coverage is the United States only.
+Not included: flight plan filing.
+
+Coverage: everything works in the US. Elsewhere you get airports, runways, frequencies, navaids, METAR, TAF and SIGMETs (METAR and TAF through the relay), radar, direct routes with winds aloft, open flightmaps charts where available, and world airspace with an OpenAIP key. FAA charts, plates, airways, procedures, obstacles and advisories cover the US only.
 
 ## Put it on GitHub
 
@@ -71,7 +73,7 @@ The included GitHub Action (`.github/workflows/update-data.yml`) runs this weekl
 
 ## Relay server (optional, free)
 
-Live traffic, NOTAMs and raw METAR/TAF text cannot be fetched by a browser directly. The small relay in `server/` fetches them for the app. It runs on the Cloudflare Workers free plan (100,000 requests a day). The app works without it; those three features stay off.
+Live traffic, NOTAMs, raw METAR/TAF text and weather outside the US cannot be fetched by a browser directly. The small relay in `server/` fetches them for the app. It runs on the Cloudflare Workers free plan (100,000 requests a day). The app works without it; those features stay off.
 
 1. Create a free account at cloudflare.com.
 2. Deploy the relay:
@@ -85,7 +87,22 @@ npx wrangler deploy
 3. Copy the address it prints (like `https://kestrel-relay.yourname.workers.dev`) into `proxyUrl` in `js/config.js`, then upload that file.
 4. In `server/wrangler.toml`, set `ALLOWED_ORIGINS` to your site's address so other sites cannot use your relay, then deploy again.
 
-Traffic and raw weather work as soon as the relay is deployed. NOTAMs also need a key, from either source.
+Traffic and weather work as soon as the relay is deployed. World airspace and NOTAMs also need a key.
+
+### World airspace (OpenAIP)
+
+Create a free account at openaip.net, open your profile, and create an API client key. Then store it and deploy again:
+
+```bash
+npx wrangler secret put OPENAIP_KEY
+npx wrangler deploy
+```
+
+Then turn on Airspace (world) in the map layers. The relay keeps each tile for a day, so OpenAIP sees few requests.
+
+### NOTAMs
+
+NOTAMs need a key from either source.
 
 SkyLink API (skylinkapi.com): apply for the free trial (1,000 requests a month, personal use, reviewed within about a week), then store the key and deploy again:
 
@@ -129,8 +146,12 @@ All free, with no paid API.
 |---|---|
 | Charts, airspace, fixes, airways, plates | FAA |
 | Airports, runways, frequencies, navaids | OurAirports (public domain) |
-| METAR, TAF, SIGMET | National Weather Service |
-| Radar | Iowa Environmental Mesonet |
+| METAR, TAF, SIGMET in the US | National Weather Service |
+| METAR, TAF, SIGMET elsewhere (through the relay) | aviationweather.gov |
+| Radar in the US | Iowa Environmental Mesonet |
+| Radar elsewhere | RainViewer ("Weather data by RainViewer") |
+| VFR charts in Europe | open flightmaps (OFMA General Users' License) |
+| World airspace (through the relay) | OpenAIP (openaip.net) |
 | Winds aloft, terrain elevation | Open-Meteo |
 | Terrain hazard tiles | Mapzen terrain tiles on AWS |
 | D-ATIS | atis.info |

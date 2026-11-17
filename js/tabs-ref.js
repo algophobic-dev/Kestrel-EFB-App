@@ -62,7 +62,8 @@ export const Airports = {
           ),
         card('Runways', rwBox), card('Frequencies', fqBox),
         card('Fuel', h('label', { class: 'field' }, h('span', {}, 'Your price note'), fuelNote),
-          h('div', { class: 'note', style: 'margin-top:6px' }, h('a', { href: `https://www.airnav.com/airport/${a.local || a.id}`, target: '_blank', rel: 'noopener' }, 'See fuel prices at airnav.com'))),
+          // AirNav lists US airports only; outside the US the place line holds a country name, not a state code.
+          /^[A-Z]{2}$/.test(a.state || '') && h('div', { class: 'note', style: 'margin-top:6px' }, h('a', { href: `https://www.airnav.com/airport/${a.local || a.id}`, target: '_blank', rel: 'noopener' }, 'See fuel prices at airnav.com'))),
         card('NOTAMs', notamBox))));
     const cur = a.id;
     const wind = a.wx ? metar(a.wxId).then(m => {
@@ -134,7 +135,7 @@ export const Plates = {
       h('div', { class: 'pane-head' }, h('button', { class: 'btn sq', title: 'Back to airport search', onclick: () => this.fill() }, icon('back')), h('h2', {}, a.id), h('button', { class: 'btn sm', onclick: e => saveAll(e.target) }, 'Save offline')),
       h('div', { class: 'note', style: 'padding:0 12px 6px' }, `FAA cycle ${p.cycle} · valid ${p.from.split(/\s+/).pop()} to ${p.to.split(/\s+/).pop()}`),
       ...groups.flatMap(([name, list]) => [h('div', { class: 'sect' }, name), ...list.map(x => h('button', { class: 'row', onclick: e => { this.list.querySelectorAll('.sel').forEach(n => n.classList.remove('sel')); e.currentTarget.classList.add('sel'); this.view(a, x, url(x[2])); } }, h('div', { class: 'grow' }, h('div', { class: 't', style: 'font-weight:600' }, x[1]))))]));
-    if (!p.list.length) this.list.append(h('div', { class: 'empty' }, 'No published procedures for this airport.'));
+    if (!p.list.length) this.list.append(h('div', { class: 'empty' }, /^[A-Z]{2}$/.test(a.state || '') ? 'No published procedures for this airport.' : 'Plates come from the FAA and cover US airports only.'));
   },
   view(a, x, url) {
     this.sp.showDetail();

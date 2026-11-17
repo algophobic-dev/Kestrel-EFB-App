@@ -77,16 +77,27 @@ try {
 } catch (e) { console.warn('weather station list failed:', e.message); }
 
 const TYPES = { small_airport: 0, medium_airport: 1, large_airport: 2, seaplane_base: 3, heliport: 4 };
-const apRows = csv(await get(OA + 'airports.csv')).filter(a => COUNTRIES.has(a.iso_country) && a.type in TYPES);
+// Every airport in the US and its territories. Elsewhere, airports only (no heliports or seaplane bases), to keep the file small.
+const apRows = csv(await get(OA + 'airports.csv')).filter(a => a.type in TYPES && (COUNTRIES.has(a.iso_country) || TYPES[a.type] <= 2));
+// Outside the US the place line shows the country name, since a code like CA could be read as California.
+const countryName = Object.fromEntries(csv(await get(OA + 'countries.csv')).map(c => [c.code, c.name]));
 const idOf = {};          // OurAirports ident -> our id
+const used = new Set();
+// US airports first, so a US identifier always wins when another country uses the same local code.
+apRows.sort((a, b) => COUNTRIES.has(b.iso_country) - COUNTRIES.has(a.iso_country));
 const airports = apRows.map(a => {
-  // Pilots know an airport by its ICAO code, or by its FAA identifier when it has no ICAO code.
-  const id = a.icao_code || a.local_code || a.gps_code || a.ident;
-  idOf[a.ident] = id;
+  const us = COUNTRIES.has(a.iso_country);
+  // Pilots know an airport by its ICAO code, or in the US by its FAA identifier when it has no ICAO code.
+  let id = us ? a.icao_code || a.local_code || a.gps_code || a.ident : a.icao_code || a.gps_code || a.ident;
+  // A code already taken falls back to the OurAirports ident, then to the ident with the country, so every id is unique.
+  if (used.has(id)) id = a.ident;
+  if (used.has(id)) id = a.ident + '-' + a.iso_country;
+  for (let n = 2; used.has(id); n++) id = a.ident + '-' + n;
+  used.add(id); idOf[a.ident] = id;
   // Weather stations are keyed by ICAO-style ids (K + FAA identifier for most of the lower 48).
-  const station = [a.icao_code, a.gps_code, a.local_code && 'K' + a.local_code].find(s => s && wxSites[s]);
+  const station = [a.icao_code, a.gps_code, us && a.local_code && 'K' + a.local_code].find(s => s && wxSites[s]);
   return [id, a.name, r5(+a.latitude_deg), r5(+a.longitude_deg), Math.round(+a.elevation_ft || 0), TYPES[a.type],
-    a.municipality, a.iso_region.split('-')[1] || '', a.local_code && a.local_code !== id ? a.local_code : '',
+    a.municipality, us ? a.iso_region.split('-')[1] || '' : countryName[a.iso_country] || a.iso_country, us && a.local_code && a.local_code !== id ? a.local_code : '',
     station ? wxSites[station] : 0, station && station !== id ? station : ''];
 });
 await save('airports.json', airports);
@@ -108,7 +119,7 @@ for (const f of csv(await get(OA + 'airport-frequencies.csv'))) {
 }
 await save('freqs.json', freqs);
 
-const navaids = csv(await get(OA + 'navaids.csv')).filter(n => COUNTRIES.has(n.iso_country))
+const navaids = csv(await get(OA + 'navaids.csv'))
   .map(n => [n.ident, n.name, n.type, r5(+n.latitude_deg), r5(+n.longitude_deg), +n.frequency_khz, +n.magnetic_variation_deg || 0]);
 await save('navaids.json', navaids);
 

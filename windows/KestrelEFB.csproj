@@ -11,7 +11,7 @@
     <RootNamespace>KestrelEFB</RootNamespace>
     <ApplicationIcon>app.ico</ApplicationIcon>
     <Product>Kestrel EFB</Product>
-    <Description>Free flight planning for US pilots.</Description>
+    <Description>Free flight planning for pilots.</Description>
     <Version>1.1.0</Version>
 
     <!-- One .exe that needs no .NET install on the user's PC. -->

@@ -3,6 +3,10 @@
 //   GET /wx?ids=KLEX            raw METAR and TAF text (aviationweather.gov)
 //   GET /traffic?lat=&lon=&dist= live ADS-B traffic within dist nm (adsb.lol)
 //   GET /plate?cycle=2611&pdf=X.PDF  one FAA plate PDF, so the app can place it on the map
+//   GET /metar?ids=EGLL,RJTT  decoded METARs as JSON, worldwide (aviationweather.gov)
+//   GET /taf?ids=EGLL         TAFs as JSON, worldwide (aviationweather.gov)
+//   GET /isigmet              SIGMETs outside the US as GeoJSON (aviationweather.gov)
+//   GET /oaip/{z}/{x}/{y}.png  OpenAIP airspace map tiles. Needs one secret set: OPENAIP_KEY (openaip.net, free)
 //   GET /gairmet               icing, turbulence and IFR advisories as GeoJSON (aviationweather.gov)
 //   GET, PUT, DELETE /sync      device sync, stored in the SYNC KV namespace under a hash of the user's private code
 //   POST /account             username and password accounts. An account holds the sync code, so signing in links a device
@@ -126,6 +130,33 @@ export default {
         return new Response(r.body, { headers: { ...cors, 'Content-Type': 'application/pdf', 'Cache-Control': 'public, max-age=86400' } });
       }
 
+      if (url.pathname === '/metar' || url.pathname === '/taf') {
+        const ids = (q.get('ids') || '').toUpperCase();
+        if (!/^[A-Z0-9]{4}(,[A-Z0-9]{4}){0,49}$/.test(ids)) return json({ error: 'Bad ids' }, 400, cors);
+        const r = await fetch(`https://aviationweather.gov/api/data${url.pathname}?ids=${ids}&format=json`, { headers: { 'User-Agent': 'kestrel-efb-relay' } });
+        const body = r.status === 204 ? '[]' : await r.text();
+        return new Response(body, { status: r.ok ? 200 : 502, headers: { ...cors, 'Content-Type': 'application/json', 'Cache-Control': `public, max-age=${url.pathname === '/taf' ? 600 : 180}` } });
+      }
+
+      if (url.pathname === '/isigmet') {
+        const r = await fetch('https://aviationweather.gov/api/data/isigmet?format=geojson', { headers: { 'User-Agent': 'kestrel-efb-relay' } });
+        return new Response(await r.text(), { status: r.ok ? 200 : 502, headers: { ...cors, 'Content-Type': 'application/json', 'Cache-Control': 'public, max-age=600' } });
+      }
+
+      const tile = url.pathname.match(/^\/oaip\/(\d{1,2})\/(\d{1,6})\/(\d{1,6})\.png$/);
+      if (tile) {
+        if (!env.OPENAIP_KEY) return json({ error: 'The relay has no OpenAIP key yet. Add OPENAIP_KEY' }, 501, cors);
+        // Tiles are kept at the edge for a day, so each one is fetched from OpenAIP once.
+        const cacheKey = new Request(`${url.origin}/oaip-cache/${tile[1]}/${tile[2]}/${tile[3]}`), hit = await caches.default.match(cacheKey);
+        const head = { ...cors, 'Content-Type': 'image/png', 'Cache-Control': 'public, max-age=86400' };
+        if (hit) return new Response(hit.body, { headers: head });
+        const r = await fetch(`https://api.tiles.openaip.net/api/data/openaip/${tile[1]}/${tile[2]}/${tile[3]}.png?apiKey=${env.OPENAIP_KEY}`);
+        if (!r.ok) return json({ error: `OpenAIP answered ${r.status}` }, r.status === 404 ? 404 : 502, cors);
+        const png = await r.arrayBuffer();
+        await caches.default.put(cacheKey, new Response(png, { headers: { 'Content-Type': 'image/png', 'Cache-Control': 'public, max-age=86400' } }));
+        return new Response(png, { headers: head });
+      }
+
       if (url.pathname === '/gairmet') {
         const r = await fetch('https://aviationweather.gov/api/data/gairmet?format=geojson', { headers: { 'User-Agent': 'kestrel-efb-relay' } });
         return new Response(await r.text(), { status: r.ok ? 200 : 502, headers: { ...cors, 'Content-Type': 'application/json', 'Cache-Control': 'public, max-age=600' } });
@@ -159,6 +190,6 @@ export default {
     } catch (e) {
       return json({ error: 'Relay error: ' + e.message }, 502, cors);
     }
-    return json({ ok: true, routes: ['/wx', '/traffic', '/gairmet', '/plate', '/notams'] }, url.pathname === '/' ? 200 : 404, cors);
+    return json({ ok: true, routes: ['/wx', '/metar', '/taf', '/isigmet', '/traffic', '/gairmet', '/plate', '/notams', '/oaip', '/sync', '/account'] }, url.pathname === '/' ? 200 : 404, cors);
   },
 };

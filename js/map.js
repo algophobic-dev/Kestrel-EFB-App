@@ -25,14 +25,30 @@ export const CHARTS = {
   tac: { name: 'VFR Terminal', url: FAA_TILES + 'VFR_Terminal/MapServer/tile/{z}/{y}/{x}', min: 10, max: 12 },
   low: { name: 'IFR Low', url: FAA_TILES + 'IFR_AreaLow/MapServer/tile/{z}/{y}/{x}', min: 7, max: 12 },
   high: { name: 'IFR High', url: FAA_TILES + 'IFR_High/MapServer/tile/{z}/{y}/{x}', min: 5, max: 9 },
+  // Europe and southern Africa, about 20 countries. Shown only, not saved for offline use.
+  ofm: { name: 'VFR Europe', url: 'https://nwy-tiles-api.prod.newaydata.com/tiles/{z}/{x}/{y}.png?path=latest/aero/latest', min: 7, max: 12, online: true, attr: '<a href="https://www.openflightmaps.org/" target="_blank" rel="noopener">open flightmaps</a>' },
 };
-const OVERLAYS = { aero: 'Airports and navaids', airspace: 'Airspace', radar: 'Radar', cat: 'Flight category', sigmet: 'SIGMETs', ice: 'Icing advisories', turb: 'Turbulence advisories', ifr: 'IFR advisories', hazard: 'Terrain hazard', obstacles: 'Obstacles', traffic: 'Traffic' };
+const OVERLAYS = { aero: 'Airports and navaids', airspace: 'Airspace (US)', oaip: 'Airspace (world)', radar: 'Radar', cat: 'Flight category', sigmet: 'SIGMETs', ice: 'Icing advisories', turb: 'Turbulence advisories', ifr: 'IFR advisories', hazard: 'Terrain hazard', obstacles: 'Obstacles', traffic: 'Traffic' };
+// US radar from Iowa Environmental Mesonet. Elsewhere, RainViewer (zoom 7 at most, 10-minute frames).
 const RADAR = o => `https://mesonet.agron.iastate.edu/cache/tile.py/1.0.0/nexrad-n0q-900913${o ? '-m' + String(o).padStart(2, '0') + 'm' : ''}/{z}/{x}/{y}.png`;
+const RV_ATTR = 'Weather data by <a href="https://www.rainviewer.com/" target="_blank" rel="noopener">RainViewer</a>';
+const OAIP_ATTR = 'Airspace: <a href="https://www.openaip.net/" target="_blank" rel="noopener">OpenAIP</a>';
+const inUS = () => { const c = map.getCenter(); return c.lat > 22 && c.lat < 51 && c.lng > -130 && c.lng < -64; };
+let rv = null;
+async function rvFrames() {
+  if (!rv || Date.now() - rv.at > 5 * 6e4) {
+    const j = await (await fetch('https://api.rainviewer.com/public/weather-maps.json')).json();
+    rv = { host: j.host, past: j.radar?.past || [], at: Date.now() };
+  }
+  if (!rv.past.length) throw new Error('No radar frames');
+  return rv;
+}
+const RV = f => `${rv.host}${f.path}/256/{z}/{x}/{y}/2/1_1.png`;
 
 const st = Object.assign({ base: 'dark', chart: 'none', ov: { aero: true, airspace: true, radar: false, cat: true, sigmet: false }, c: [39.1, -84.5], z: 8 }, kv.get('map', {}));
 const save = () => kv.set('map', st);
 export let map;
-let baseL, chartL, radarL, aeroL, routeL, airspaceL, sigmetL, ownL, canvas, hazardL, obsL, trafficL, marksL, contentL, advisL, surfL;
+let baseL, chartL, radarL, radarSrc, oaipL, aeroL, routeL, airspaceL, sigmetL, ownL, canvas, hazardL, obsL, trafficL, marksL, contentL, advisL, surfL;
 const cats = new Map(), markers = new Map();
 
 export const altText = (v, uom, code) => code === 'SFC' || (v === 0 && code !== 'MSL') ? 'Surface' : v == null || v < 0 ? (code || 'Unknown') : uom === 'FL' ? 'FL' + v : `${Number(v).toLocaleString()}' ${code || 'MSL'}`;
@@ -49,7 +65,8 @@ export function initMap() {
   routeL = L.layerGroup().addTo(map); aeroL = L.layerGroup().addTo(map); marksL = L.layerGroup().addTo(map); trafficL = L.layerGroup().addTo(map);
   applyTiles(); applyOverlays();
 
-  map.on('moveend', () => { const c = map.getCenter(); st.c = [c.lat, c.lng]; st.z = map.getZoom(); save(); drawAero(); loadAirspace(); loadObstacles(); loadSurface(); });
+  map.on('moveend', () => { const c = map.getCenter(); st.c = [c.lat, c.lng]; st.z = map.getZoom(); save(); drawAero(); loadAirspace(); loadObstacles(); loadSurface();
+    if (st.ov.radar && radarSrc !== (inUS() ? 'iem' : 'rv')) makeRadar(); });
   map.on('click', e => inspect({ lat: e.latlng.lat, lon: e.latlng.lng }));
   map.on('dragstart', () => setFollow(false));
   new ResizeObserver(() => { if ($('#map').clientWidth) map.invalidateSize(); }).observe($('#map'));
@@ -72,18 +89,45 @@ function applyTiles() {
   const b = BASES[st.base];
   baseL = L.tileLayer(b.url, { maxNativeZoom: b.max, maxZoom: 18, attribution: b.attr }).addTo(map);
   const c = CHARTS[st.chart];
-  chartL = c?.url ? L.tileLayer(c.url, { minNativeZoom: c.min, maxNativeZoom: c.max, minZoom: c.min - 1, maxZoom: 18, attribution: 'FAA charts' }).addTo(map) : null;
+  chartL = c?.url ? L.tileLayer(c.url, { minNativeZoom: c.min, maxNativeZoom: c.max, minZoom: c.min - 1, maxZoom: 18, attribution: c.attr || 'FAA charts' }).addTo(map) : null;
   $('#layer-label').textContent = c?.url ? c.name : b.name + ' map';
 }
 // Used by the Mac app's menus.
 export function setOverlay(key, on) { st.ov[key] = on ?? !st.ov[key]; save(); applyOverlays(); }
 export function setChart(key) { if (CHARTS[key]) { st.chart = key; save(); applyTiles(); } }
 export function setBase(key) { if (BASES[key]) { st.base = key; save(); applyTiles(); } }
+let radarSeq = 0;
+async function makeRadar() {
+  const my = ++radarSeq;
+  radarL?.remove(); radarL = null; radarSrc = null;
+  if (!st.ov.radar) return;
+  const src = inUS() ? 'iem' : 'rv';
+  if (src === 'rv') {
+    try { await rvFrames(); } catch { if (my === radarSeq) toast('Radar outside the US did not load. Check your connection.'); return; }
+    if (my !== radarSeq) return;
+  }
+  radarSrc = src;
+  radarL = L.tileLayer(src === 'iem' ? RADAR(0) : RV(rv.past.at(-1)), { opacity: .7, pane: 'wx', maxNativeZoom: src === 'iem' ? 9 : 7, attribution: src === 'iem' ? 'IEM radar' : RV_ATTR }).addTo(map);
+  setRadarFrame(+$('#radar-slider').value);
+}
+let oaipSeq = 0;
+async function setOaip() {
+  const my = ++oaipSeq;
+  oaipL?.remove(); oaipL = null;
+  if (!st.ov.oaip) return;
+  const off = msg => { st.ov.oaip = false; save(); toast(msg); };
+  if (!CONFIG.proxyUrl) return off('World airspace needs the relay server. See the README to set it up.');
+  const base = CONFIG.proxyUrl.replace(/\/$/, '') + '/oaip';
+  const r = await fetch(base + '/2/2/1.png').catch(() => null);
+  if (my !== oaipSeq) return;
+  if (r?.status === 501) return off('World airspace needs an OpenAIP key on the relay. See the README.');
+  if (!r?.ok) return off('World airspace did not load. Check your connection.');
+  oaipL = L.tileLayer(base + '/{z}/{x}/{y}.png', { pane: 'wx', minZoom: 4, maxNativeZoom: 14, attribution: OAIP_ATTR }).addTo(map);
+}
 function applyOverlays() {
-  radarL?.remove(); radarL = null;
   $('#timebar').classList.toggle('hidden', !st.ov.radar);
   $('#map-clock').classList.toggle('hidden', !st.ov.radar);
-  if (st.ov.radar) { radarL = L.tileLayer(RADAR(0), { opacity: .7, pane: 'wx', maxNativeZoom: 9, attribution: 'IEM radar' }).addTo(map); setRadarFrame(10); }
+  makeRadar(); setOaip();
   drawAero(); loadAirspace(); loadSigmets();
   hazardL?.remove(); hazardL = null; hazardAt = null;
   if (st.ov.hazard) { hazardL = new Hazard({ pane: 'wx', maxNativeZoom: 11, minZoom: 6, attribution: 'Terrain: Mapzen' }).addTo(map); hazardAt = hazardRef(); }
@@ -196,13 +240,18 @@ async function loadSigmets() {
 // ---------- radar loop
 let playing = null;
 function setRadarFrame(i) {
-  const off = (10 - i) * 5;
+  let off = (10 - i) * 5;
   $('#radar-slider').value = i;
-  const t = new Date(Math.floor(Date.now() / 3e5) * 3e5 - off * 6e4);
+  let t = new Date(Math.floor(Date.now() / 3e5) * 3e5 - off * 6e4);
+  if (radarSrc === 'rv') {
+    // RainViewer has a frame every 10 minutes: show the one nearest the slider's time.
+    const f = rv.past.reduce((a, b) => Math.abs(b.time * 1e3 - t) < Math.abs(a.time * 1e3 - t) ? b : a);
+    t = new Date(f.time * 1e3); off = Math.round((rv.past.at(-1).time - f.time) / 60);
+    if (radarL && radarL._url !== RV(f)) radarL.setUrl(RV(f));
+  } else radarL?.setUrl(RADAR(off));
   const txt = t.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
   $('#radar-label').innerHTML = `${off ? '-' + off + ' min' : 'Latest'}<br>${txt}`;
   $('#map-clock').textContent = 'Radar ' + txt;
-  radarL?.setUrl(RADAR(off));
 }
 function initRadarBar() {
   $('#radar-slider').oninput = e => setRadarFrame(+e.target.value);

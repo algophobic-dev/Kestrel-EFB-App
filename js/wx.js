@@ -1,5 +1,6 @@
 // Weather and terrain from free, keyless sources:
-// METAR/TAF/SIGMET: api.weather.gov (NWS) · winds aloft and elevation: open-meteo.com
+// METAR/TAF/SIGMET: api.weather.gov (NWS) for US stations, aviationweather.gov through the relay elsewhere
+// winds aloft and elevation: open-meteo.com
 import { pressureLevel } from './geo.js';
 import { CONFIG } from './config.js';
 
@@ -21,7 +22,39 @@ export function category(visSM, ceilFt) {
 const visText = sm => sm >= 6 ? (sm >= 9.9 ? '10SM' : Math.round(sm) + 'SM') : sm >= 3 ? Math.round(sm) + 'SM'
   : sm >= 1 ? (Math.round(sm * 2) / 2 + 'SM').replace('.5SM', ' 1/2SM') : sm >= .7 ? '3/4SM' : sm >= .4 ? '1/2SM' : '1/4SM';
 
+// The NWS covers the US and its territories. Other stations come from aviationweather.gov through the relay.
+const isUS = id => /^(K[A-Z0-9]{3}|P[AFGHOP][A-Z0-9]{2}|T[IJ][A-Z0-9]{2}|NSTU)$/.test(id);
+const relayUrl = () => CONFIG.proxyUrl.replace(/\/$/, '');
+// Requests made within a moment of each other share one relay call (the map asks for many airports at once).
+let batch = null;
+function worldMetar(id) {
+  if (!batch) { const b = batch = { ids: new Map() }; setTimeout(() => { batch = null; flush(b); }, 120); }
+  return new Promise((ok, fail) => { const list = batch.ids.get(id) || []; list.push({ ok, fail }); batch.ids.set(id, list); });
+}
+async function flush(b) {
+  const ids = [...b.ids.keys()], got = new Map();
+  try {
+    for (let i = 0; i < ids.length; i += 40) {
+      const r = await fetch(`${relayUrl()}/metar?ids=${ids.slice(i, i + 40).join(',')}`); if (!r.ok) throw new Error('relay ' + r.status);
+      for (const m of await r.json()) got.set(m.icaoId, m);
+    }
+  } catch { /* leave the rest unanswered below */ }
+  for (const [id, waiters] of b.ids) {
+    const m = got.get(id);
+    waiters.forEach(w => m ? w.ok(m) : w.fail(new Error('No observation for ' + id)));
+  }
+}
+function fromAwc(id, m) {
+  const vis = m.visib == null ? null : typeof m.visib === 'string' ? parseFloat(m.visib) + (m.visib.includes('+') ? 4 : 0) : +m.visib;
+  const layers = (m.clouds || []).map(l => ({ amt: l.cover, ft: l.base ?? null }));
+  const ceil = layers.find(l => ['BKN', 'OVC', 'OVX', 'VV'].includes(l.amt))?.ft ?? null;
+  return { id, raw: (m.rawOb || '').replace(/^(METAR|SPECI) /, ''), time: new Date(m.obsTime * 1000), vis, ceil, layers,
+    dir: typeof m.wdir === 'number' ? m.wdir : null, spd: m.wspd ?? null, gust: m.wgst ?? null, temp: m.temp ?? null, dew: m.dewp ?? null,
+    alt: m.altim != null ? m.altim / 33.8639 : null, cat: m.fltCat || category(vis, ceil), decoded: false };
+}
+
 export const metar = id => cached('m' + id, 8, async () => {
+  if (!isUS(id) && CONFIG.proxyUrl) return fromAwc(id, await worldMetar(id));
   const r = await fetch(`${NWS}/stations/${id}/observations/latest`); if (!r.ok) throw new Error('No observation for ' + id);
   const p = (await r.json()).properties, val = x => x && x.value != null ? x.value : null;
   const t = new Date(p.timestamp);
@@ -41,6 +74,11 @@ export const metar = id => cached('m' + id, 8, async () => {
 
 // The NWS serves TAFs as IWXXM XML. Rebuild the familiar text groups from it.
 export const taf = id => cached('t' + id, 20, async () => {
+  if (!isUS(id) && CONFIG.proxyUrl) {
+    const r = await fetch(`${relayUrl()}/taf?ids=${id}`), t = r.ok ? (await r.json())[0] : null;
+    if (!t?.rawTAF) throw new Error('No TAF for ' + id);
+    return { raw: t.rawTAF.replace(/ (FM\d{6}|BECMG|TEMPO|PROB\d{2}(?! TEMPO)|PROB\d{2} TEMPO)/g, '\n  $1'), issued: new Date(t.issueTime) };
+  }
   const r = await fetch(`${NWS}/stations/${id}/tafs`); if (!r.ok) throw new Error('No TAF for ' + id);
   const first = (await r.json())['@graph']?.[0]; if (!first) throw new Error('No TAF for ' + id);
   const xml = new DOMParser().parseFromString(await (await fetch(first.id)).text(), 'text/xml');
@@ -82,7 +120,14 @@ export const taf = id => cached('t' + id, 20, async () => {
   return { raw: lines.join('\n'), issued: issue };
 });
 
-export const sigmets = () => cached('sig', 10, async () => (await fetch(`${NWS}/aviation/sigmets`)).json());
+// US SIGMETs from the NWS, plus the rest of the world through the relay when there is one.
+export const sigmets = () => cached('sig', 10, async () => {
+  const [us, world] = await Promise.all([
+    fetch(`${NWS}/aviation/sigmets`).then(r => r.json()).catch(() => null),
+    CONFIG.proxyUrl ? fetch(`${relayUrl()}/isigmet`).then(r => r.ok ? r.json() : null).catch(() => null) : null]);
+  if (!us && !world) throw new Error('SIGMETs did not load');
+  return { type: 'FeatureCollection', features: [...(us?.features || []), ...(world?.features || [])] };
+});
 
 // Winds aloft for a list of points at one altitude. Returns [{dir, spd}] (true degrees, knots).
 export async function winds(points, altFt) {
@@ -121,7 +166,7 @@ export const hasRelay = () => !!CONFIG.proxyUrl;
 export const rawWx = id => cached('r' + id, 5, async () => {
   const r = await fetch(`${relay()}/wx?ids=${id}`); if (!r.ok) throw new Error('Relay did not answer');
   const t = await r.text(), i = t.indexOf('TAF ');
-  return { metar: (i < 0 ? t : t.slice(0, i)).replace(/^(METAR|SPECI) /, '').trim(), taf: i < 0 ? '' : t.slice(i).trim() };
+  return { metar: (i < 0 ? t : t.slice(0, i)).replace(/^(METAR|SPECI) /, '').trim(), taf: i < 0 ? '' : t.slice(i).trim().replace(/(PROB\d{2})\s*\n\s*TEMPO/g, '$1 TEMPO').replace(/ +\n/g, '\n') };
 });
 export const notams = id => cached('n' + id, 10, async () => {
   const r = await fetch(`${relay()}/notams?icao=${id}`), j = await r.json().catch(() => ({}));
