@@ -124,9 +124,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         ]))
 
         // Map: charts, base maps, overlays, zoom, position
-        let charts = [("None", "none"), ("VFR Sectional", "sec"), ("VFR Terminal", "tac"), ("IFR Low", "low"), ("IFR High", "high")]
+        let charts = [("None", "none"), ("VFR Sectional", "sec"), ("VFR Terminal", "tac"), ("IFR Low", "low"), ("IFR High", "high"), ("VFR Europe", "ofm")]
         let bases = [("Dark", "dark"), ("Light", "light"), ("Topographic", "topo"), ("Satellite", "sat")]
-        let overlays = [("Airports and Navaids", "aero"), ("Airspace", "airspace"), ("Radar", "radar"), ("Flight Category", "cat"), ("SIGMETs", "sigmet"),
+        let overlays = [("Airports and Navaids", "aero"), ("Airspace (US)", "airspace"), ("Airspace (World)", "oaip"), ("Radar", "radar"), ("Flight Category", "cat"), ("SIGMETs", "sigmet"),
                         ("Icing Advisories", "ice"), ("Turbulence Advisories", "turb"), ("IFR Advisories", "ifr"),
                         ("Terrain Hazard", "hazard"), ("Obstacles", "obstacles"), ("Traffic", "traffic")]
         main.addItem(menu("Map", [

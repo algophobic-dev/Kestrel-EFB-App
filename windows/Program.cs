@@ -163,11 +163,11 @@ sealed class MainForm : Form
         view.DropDownItems.Add(Item("F&ull Screen", ToggleFullScreen, Keys.F11));
         strip.Items.Add(view);
 
-        string[][] charts = { new[] { "None", "none" }, new[] { "VFR Sectional", "sec" }, new[] { "VFR Terminal", "tac" }, new[] { "IFR Low", "low" }, new[] { "IFR High", "high" } };
+        string[][] charts = { new[] { "None", "none" }, new[] { "VFR Sectional", "sec" }, new[] { "VFR Terminal", "tac" }, new[] { "IFR Low", "low" }, new[] { "IFR High", "high" }, new[] { "VFR Europe", "ofm" } };
         string[][] bases = { new[] { "Dark", "dark" }, new[] { "Light", "light" }, new[] { "Topographic", "topo" }, new[] { "Satellite", "sat" } };
         string[][] layers =
         {
-            new[] { "Airports and Navaids", "aero" }, new[] { "Airspace", "airspace" }, new[] { "Radar", "radar" }, new[] { "Flight Category", "cat" }, new[] { "SIGMETs", "sigmet" },
+            new[] { "Airports and Navaids", "aero" }, new[] { "Airspace (US)", "airspace" }, new[] { "Airspace (World)", "oaip" }, new[] { "Radar", "radar" }, new[] { "Flight Category", "cat" }, new[] { "SIGMETs", "sigmet" },
             new[] { "Icing Advisories", "ice" }, new[] { "Turbulence Advisories", "turb" }, new[] { "IFR Advisories", "ifr" },
             new[] { "Terrain Hazard", "hazard" }, new[] { "Obstacles", "obstacles" }, new[] { "Traffic", "traffic" },
         };
@@ -197,7 +197,7 @@ sealed class MainForm : Form
 
         strip.Items.Add(Menu("&Help",
             Item("Kestrel EFB &Help", () => OpenExternal(Help), Keys.F1),
-            Item("&About Kestrel EFB", () => MessageBox.Show(this, "Kestrel EFB 1.1\nFree flight planning for pilots.", "About Kestrel EFB", MessageBoxButtons.OK, MessageBoxIcon.Information))));
+            Item("&About Kestrel EFB", () => MessageBox.Show(this, "Kestrel EFB 1.2\nFree flight planning for pilots.", "About Kestrel EFB", MessageBoxButtons.OK, MessageBoxIcon.Information))));
         return strip;
     }
 
