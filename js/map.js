@@ -17,7 +17,9 @@ export const BASES = {
     : { name: 'Dark', url: 'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}', min: 3, max: 16, attr: '© Esri', online: true },
   ...(CK ? { light: { name: 'Light', url: CARTO + 'voyager/{z}/{x}/{y}.png' + CK, min: 3, max: 18, attr: CARTO_ATTR, online: true } } : {}),
   topo: { name: 'Topographic', url: 'https://basemap.nationalmap.gov/arcgis/rest/services/USGSTopo/MapServer/tile/{z}/{y}/{x}', min: 3, max: 16, attr: 'USGS' },
-  sat: { name: 'Satellite', url: 'https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer/tile/{z}/{y}/{x}', min: 3, max: 16, attr: 'USGS' },
+  // USGS imagery covers the US and can be saved offline. Elsewhere the map shows Esri World Imagery (online only).
+  sat: { name: 'Satellite', url: 'https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer/tile/{z}/{y}/{x}', min: 3, max: 16, attr: 'USGS',
+    world: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', worldAttr: 'USGS · Imagery © Esri, Maxar, Earthstar Geographics' },
 };
 export const CHARTS = {
   none: { name: 'None' },
@@ -87,11 +89,23 @@ function applyTiles() {
   baseL?.remove(); chartL?.remove();
   if (!BASES[st.base]) st.base = 'dark';
   const b = BASES[st.base];
-  baseL = L.tileLayer(b.url, { maxNativeZoom: b.max, maxZoom: 18, attribution: b.attr }).addTo(map);
+  baseL = (b.world ? new SplitLayer(b) : L.tileLayer(b.url, { maxNativeZoom: b.max, maxZoom: 18, attribution: b.attr })).addTo(map);
   const c = CHARTS[st.chart];
   chartL = c?.url ? L.tileLayer(c.url, { minNativeZoom: c.min, maxNativeZoom: c.max, minZoom: c.min - 1, maxZoom: 18, attribution: c.attr || 'FAA charts' }).addTo(map) : null;
   $('#layer-label').textContent = c?.url ? c.name : b.name + ' map';
 }
+// A base map that uses the US source for tiles over the US and its states and territories, and the world source elsewhere.
+const US_BOXES = [[24, -125, 50, -66], [51, -170, 72, -129], [18, -161, 23, -154], [17.5, -67.5, 18.7, -64.5], [13, 144, 21, 146.5]];
+const overUS = (lat, lon) => US_BOXES.some(([s, w, n, e]) => lat >= s && lat <= n && lon >= w && lon <= e);
+const SplitLayer = L.TileLayer.extend({
+  initialize(b) { this.b = b; L.TileLayer.prototype.initialize.call(this, b.world, { maxNativeZoom: b.max, maxZoom: 18, attribution: b.worldAttr }); },
+  getTileUrl(c) {
+    const z = this._getZoomForUrl(), n = 2 ** z, lon = (c.x + .5) / n * 360 - 180;
+    const lat = Math.atan(Math.sinh(Math.PI * (1 - 2 * (c.y + .5) / n))) * 180 / Math.PI;
+    const url = z >= 6 && overUS(lat, lon) ? this.b.url : this.b.world;
+    return L.Util.template(url, { z, x: c.x, y: c.y });
+  },
+});
 // Used by the Mac app's menus.
 export function setOverlay(key, on) { st.ov[key] = on ?? !st.ov[key]; save(); applyOverlays(); }
 export function setChart(key) { if (CHARTS[key]) { st.chart = key; save(); applyTiles(); } }

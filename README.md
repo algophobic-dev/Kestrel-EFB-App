@@ -157,4 +157,5 @@ All free, with no paid API.
 | D-ATIS | atis.info |
 | Live traffic (through the relay) | adsb.lol |
 | Base maps | CARTO and OpenStreetMap, USGS |
+| Satellite outside the US | Esri World Imagery (shown online only, not saved offline) |
 | Map library | Leaflet (in `lib/`) |
