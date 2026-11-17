@@ -29,7 +29,7 @@ window.Kestrel = {
   follow: () => onMap(() => $('#tool-follow').click()),
   record: () => onMap(() => $('#tool-rec').click()),
   // Other
-  syncNow: () => syncCode() ? sync().then(() => toast('Sync finished.')) : (emit('tab', 'more'), toast('Sync is off. Turn it on under More > Sync.')),
+  syncNow: () => syncCode() ? sync().then(() => toast('Sync finished.')) : (emit('tab', 'more'), toast('Sync is off. Sign in under More > Account and sync.')),
   // Lay out the current NavLog for printing. Returns false when there is nothing to print.
   preparePrint() {
     if (current.legs.length < 1) { toast('Enter a route with at least two points to print a NavLog.'); return false; }

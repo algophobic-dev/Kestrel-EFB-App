@@ -25,8 +25,8 @@ static class Program
 
 sealed class MainForm : Form
 {
-    const string SiteUrl = "https://algophobic-dev.github.io/Kestrel-EFB/";
-    const string Help = "https://github.com/algophobic-dev/Kestrel-EFB#readme";
+    const string SiteUrl = "https://algophobic-dev.github.io/Kestrel-EFB-App/";
+    const string Help = "https://github.com/algophobic-dev/Kestrel-EFB-App#readme";
     const string OfflinePage =
         "<html><body style=\"margin:0;height:100vh;display:grid;place-items:center;background:#10161a;color:#eef3f6;font:15px Segoe UI,sans-serif;text-align:center\">" +
         "<div><h2 style=\"margin:0 0 8px\">Kestrel EFB could not load</h2>" +
@@ -197,7 +197,7 @@ sealed class MainForm : Form
 
         strip.Items.Add(Menu("&Help",
             Item("Kestrel EFB &Help", () => OpenExternal(Help), Keys.F1),
-            Item("&About Kestrel EFB", () => MessageBox.Show(this, "Kestrel EFB 1.0\nFree flight planning for US pilots.", "About Kestrel EFB", MessageBoxButtons.OK, MessageBoxIcon.Information))));
+            Item("&About Kestrel EFB", () => MessageBox.Show(this, "Kestrel EFB 1.1\nFree flight planning for US pilots.", "About Kestrel EFB", MessageBoxButtons.OK, MessageBoxIcon.Information))));
         return strip;
     }
 

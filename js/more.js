@@ -4,7 +4,7 @@ import { aircraft } from './route.js';
 import { part, marks } from './db.js';
 import { BASES, CHARTS, mapView, showTrack, flyTo } from './map.js';
 import { fmtDur, fmtLL } from './geo.js';
-import { syncCode, syncState, newCode, validCode, link, unlink, sync, deleteServerCopy } from './sync.js';
+import { syncCode, syncState, newCode, validCode, link, unlink, sync, deleteServerCopy, accountName, validUser, signUp, signIn, resetPassword, newRecovery, deleteAccount } from './sync.js';
 
 const card = (title, ...kids) => h('div', { class: 'card' }, h('h3', {}, title), kids);
 const field = (label, input, cls) => h('label', { class: 'field ' + (cls || '') }, h('span', {}, label), input);
@@ -22,7 +22,7 @@ function tileUrls(layer, b, z0, z1) {
 export const More = {
   init(view) {
     this.detail = h('div', { class: 'pane-detail' });
-    const items = [['Aircraft', () => this.aircraft()], ['Sync', () => this.sync()], ['Downloads', () => this.downloads()], ['Marked positions', () => this.marks()], ['Map content', () => this.content()], ['Track logs', () => this.tracks()], ['About', () => this.about()]];
+    const items = [['Aircraft', () => this.aircraft()], ['Account and sync', () => this.sync()], ['Downloads', () => this.downloads()], ['Marked positions', () => this.marks()], ['Map content', () => this.content()], ['Track logs', () => this.tracks()], ['About', () => this.about()]];
     this.list = h('div', { class: 'list' }, items.map(([n, fn]) => h('button', { class: 'row', onclick: e => { this.list.querySelectorAll('.sel').forEach(x => x.classList.remove('sel')); e.currentTarget.classList.add('sel'); this.sp.showDetail(); fn(); } }, h('div', { class: 'grow' }, h('div', { class: 't', style: 'font-weight:600' }, n)))));
     this.sp = split(view, h('div', { class: 'pane-list' }, h('div', { class: 'pane-head' }, h('h2', {}, 'More')), this.list), this.detail);
     on('tracks', () => this.section === 'tracks' && this.tracks());
@@ -118,35 +118,92 @@ export const More = {
         : h('div', { class: 'empty' }, 'No track logs. On the Maps tab, select REC to record your flight.')));
   },
 
-  // ----- Sync
+  // ----- Account and sync
+  // Show a new recovery code once, with ways to keep it.
+  showRecovery(code) {
+    modal('Save your recovery code', h('div', {},
+      h('p', { style: 'margin-top:0' }, 'This code is the only way back into your account if you forget your password. It is shown once.'),
+      h('div', { class: 'mono', style: 'font-size:17px;font-weight:700;letter-spacing:.04em;margin:10px 0' }, code),
+      h('div', { class: 'bar' },
+        h('button', { class: 'btn sm', onclick: () => navigator.clipboard?.writeText(code).then(() => toast('Code copied.')).catch(() => toast('Copy did not work. Write the code down.')) }, 'Copy code'),
+        h('button', { class: 'btn sm', onclick: () => download('kestrel-recovery-code.txt', `Kestrel EFB recovery code for ${accountName()}\n${code}\n`) }, 'Download code'))));
+  },
+  // Ask for the password before a sensitive account action.
+  askPassword(title, text, label, danger, run) {
+    const inp = h('input', { type: 'password', autocomplete: 'current-password' });
+    modal(title, h('div', {}, h('p', { style: 'margin-top:0' }, text), field('Password', inp)), [{ label, danger, run: async () => { try { await run(inp.value); } catch (e) { toast(e.message + '.'); return false; } } }]);
+  },
   sync() {
     this.section = 'sync';
-    const code = syncCode(), st = syncState();
+    const code = syncCode(), st = syncState(), name = accountName();
     const what = 'Aircraft, flights, logbook, checklists, marked positions and fuel notes sync. Documents, downloaded charts, saved plates, ScratchPads and track logs stay on each device.';
+    const userIn = () => h('input', { type: 'text', autocomplete: 'username', autocapitalize: 'none', spellcheck: 'false', maxlength: 20 });
+    const passIn = auto => h('input', { type: 'password', autocomplete: auto });
+    // Check the fields, run the action, and report a problem as a toast.
+    const submit = async (btn, user, pass, isNew, run) => {
+      const u = user.value.trim().toLowerCase();
+      if (!validUser(u)) return toast('Enter a username of 3 to 20 letters, numbers or underscores.');
+      if (isNew && pass.value.length < 8) return toast('Enter a password of at least 8 characters.');
+      if (!pass.value) return toast('Enter your password.');
+      btn.disabled = true;
+      try { await run(u, pass.value); } catch (e) { toast(e.message + '.'); btn.disabled = false; }
+    };
+    const createCard = (title, note) => {
+      const u = userIn(), p = passIn('new-password');
+      return card(title, h('p', { class: 'note', style: 'margin-top:0' }, note),
+        field('Username', u), field('Password, at least 8 characters', p),
+        h('div', { class: 'bar', style: 'margin-top:8px' }, h('button', { class: 'btn primary', onclick: e => submit(e.currentTarget, u, p, true, async (user, pass) => { const rec = await signUp(user, pass); toast('Account created.'); this.showRecovery(rec); }) }, 'Create account')));
+    };
     if (!code) {
+      const u = userIn(), p = passIn('current-password');
+      const forgot = () => {
+        const fu = userIn(), fr = h('input', { type: 'text', placeholder: 'XXXX-XXXX-XXXX-XXXX', autocapitalize: 'characters', spellcheck: 'false', style: 'text-transform:uppercase;font-family:var(--mono)' }), fp = passIn('new-password');
+        fu.value = u.value;
+        modal('Reset your password', h('div', { style: 'display:grid;gap:8px' }, field('Username', fu), field('Recovery code', fr), field('New password, at least 8 characters', fp)),
+          [{ label: 'Reset password', run: async () => {
+            const user = fu.value.trim().toLowerCase();
+            if (!validUser(user) || !fr.value.trim() || fp.value.length < 8) { toast('Enter your username, your recovery code and a new password of at least 8 characters.'); return false; }
+            try { const rec = await resetPassword(user, fr.value.trim(), fp.value); toast('Password changed. You are signed in.'); setTimeout(() => this.showRecovery(rec)); } catch (e) { toast(e.message + '.'); return false; }
+          } }]);
+      };
       const inp = h('input', { type: 'text', placeholder: 'XXXX-XXXX-XXXX-XXXX-XXXX-XXXX', autocapitalize: 'characters', spellcheck: 'false', style: 'width:100%;text-transform:uppercase;font-family:var(--mono)' });
       const go = async (c, isNew, btn) => { btn.disabled = true; const s = await link(c, isNew); if (s.error) { unlink(); toast(s.error + '.'); btn.disabled = false; } else toast(isNew ? 'Sync is on. Enter this code on your other devices.' : 'This device is linked.'); };
-      this.detail.replaceChildren(h('div', { class: 'pad' }, this.head('Sync'),
+      this.detail.replaceChildren(h('div', { class: 'pad' }, this.head('Account and sync'),
         h('div', { class: 'cards' },
-          card('Start syncing', h('p', { class: 'note', style: 'margin-top:0' }, 'Create a private code, then enter it on your other devices. No email or password.'),
-            h('button', { class: 'btn primary', onclick: e => go(newCode(), true, e.currentTarget) }, 'Create a sync code')),
-          card('Link to another device', field('Code from your other device', inp),
+          card('Sign in', field('Username', u), field('Password', p),
+            h('div', { class: 'bar', style: 'margin-top:8px' },
+              h('button', { class: 'btn primary', onclick: e => submit(e.currentTarget, u, p, false, async (user, pass) => { await signIn(user, pass); toast('Signed in. Your synced items are on this device.'); }) }, 'Sign in'),
+              h('button', { class: 'btn', onclick: forgot }, 'Forgot password')),
+            h('p', { class: 'note' }, 'Signing in replaces this device’s synced items with the copy from your account.')),
+          createCard('Create an account', 'An account keeps your data in sync on every device you sign in on. No email needed.'),
+          card('Sync without an account', h('p', { class: 'note', style: 'margin-top:0' }, 'Create a private code, then enter it on your other devices.'),
+            h('button', { class: 'btn', onclick: e => go(newCode(), true, e.currentTarget) }, 'Create a sync code'),
+            h('div', { style: 'height:10px' }),
+            field('Code from your other device', inp),
             h('div', { class: 'bar', style: 'margin-top:8px' }, h('button', { class: 'btn', onclick: e => { const c = inp.value.trim().toUpperCase(); validCode(c) ? go(c, false, e.currentTarget) : toast('Enter the code as six groups of four, like ABCD-EFGH-JKLM-NPQR-STUV-WXYZ.'); } }, 'Link this device')),
             h('p', { class: 'note' }, 'Linking replaces this device’s synced items with the copy from your other devices.'))),
         h('p', { class: 'note' }, what)));
       return;
     }
     const shown = h('div', { class: 'mono', style: 'font-size:15px;font-weight:700;letter-spacing:.04em;word-break:break-all' }, '••••-••••-••••-••••-••••-••••');
-    this.detail.replaceChildren(h('div', { class: 'pad' }, this.head('Sync', h('button', { class: 'btn sm primary', onclick: async e => { e.currentTarget.disabled = true; await sync(); } }, 'Sync now')),
+    this.detail.replaceChildren(h('div', { class: 'pad' }, this.head('Account and sync', h('button', { class: 'btn sm primary', onclick: async e => { e.currentTarget.disabled = true; await sync(); } }, 'Sync now')),
       h('div', { class: 'cards' },
+        name
+          ? card('Account', h('div', { class: 'kv' }, h('span', {}, 'Signed in as'), h('span', {}, name)),
+              h('div', { class: 'bar', style: 'margin-top:8px' },
+                h('button', { class: 'btn sm', onclick: () => { unlink(); toast('Signed out. This device’s data stays here.'); } }, 'Sign out'),
+                h('button', { class: 'btn sm', onclick: () => this.askPassword('Get a new recovery code?', 'Your old recovery code stops working.', 'Get new code', false, async pass => { const rec = await newRecovery(pass); setTimeout(() => this.showRecovery(rec)); }) }, 'New recovery code'),
+                h('button', { class: 'btn sm danger', onclick: () => this.askPassword('Delete your account?', 'This deletes your account and its synced copy, and signs this device out. Data on your devices stays. You cannot undo this.', 'Delete account', true, async pass => { await deleteAccount(pass); toast('Account deleted.'); }) }, 'Delete account')),
+              h('p', { class: 'note' }, 'To change your password, sign out, then select Forgot password and enter your recovery code.'))
+          : createCard('Add a username and password', 'Sign in on other devices with a username and password instead of typing the sync code. No email needed.'),
         card('Status', h('div', { class: 'kv' }, h('span', {}, 'Last synced'), h('span', {}, st.at ? new Date(st.at).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : 'Not yet')),
           st.error ? h('div', { class: 'kv' }, h('span', {}, 'Problem'), h('span', { class: 'bad' }, st.error)) : h('div', { class: 'kv' }, h('span', {}, 'State'), h('span', { class: 'ok' }, 'Up to date'))),
         card('Your sync code', shown,
           h('div', { class: 'bar', style: 'margin-top:8px' },
             h('button', { class: 'btn sm', onclick: e => { const on = shown.textContent !== code; shown.textContent = on ? code : '••••-••••-••••-••••-••••-••••'; e.currentTarget.textContent = on ? 'Hide code' : 'Show code'; } }, 'Show code'),
             h('button', { class: 'btn sm', onclick: () => navigator.clipboard?.writeText(code).then(() => toast('Code copied.')).catch(() => toast('Copy did not work. Select Show code and type it.')) }, 'Copy code')),
-          h('p', { class: 'note' }, 'Anyone with this code can read and change your synced data. Keep it private. It cannot be recovered if you lose it on every device.')),
-        card('Stop syncing',
+          h('p', { class: 'note' }, name ? 'Anyone with this code can read and change your synced data. Keep it private.' : 'Anyone with this code can read and change your synced data. Keep it private. It cannot be recovered if you lose it on every device.')),
+        name ? null : card('Stop syncing',
           h('div', { class: 'bar' },
             h('button', { class: 'btn sm', onclick: () => { unlink(); toast('This device is unlinked. Its data stays here.'); } }, 'Unlink this device'),
             h('button', { class: 'btn sm danger', onclick: () => modal('Delete the synced copy?', h('div', {}, 'This deletes the copy on the relay and unlinks this device. Data on your devices stays. You cannot undo this.'), [{ label: 'Delete', danger: true, run: async () => { try { await deleteServerCopy(); unlink(); toast('Synced copy deleted.'); } catch (e) { toast(e.message + '.'); return false; } } }]) }, 'Delete synced copy')))),

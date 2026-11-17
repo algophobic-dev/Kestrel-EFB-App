@@ -2,6 +2,9 @@
 
 A free flight-planning app for US pilots. It runs in the browser and installs on Mac, Windows, iPad and iPhone.
 
+- Website: https://algophobic-dev.github.io/Kestrel-EFB/
+- App: https://algophobic-dev.github.io/Kestrel-EFB-App/
+
 Provided as is, with no warranty. Data comes from public sources and is not verified.
 
 ## What it does
@@ -102,9 +105,9 @@ npx wrangler secret put FAA_CLIENT_ID
 npx wrangler secret put FAA_CLIENT_SECRET
 ```
 
-## Device sync (optional)
+## Accounts and device sync (optional)
 
-Sync keeps aircraft, flights, logbook, checklists, marked positions and fuel notes the same on all your devices, using a private code instead of an account. It stores the data in a free Cloudflare KV namespace on the relay. Create the namespace once, answer yes when Wrangler offers to add it to `wrangler.toml`, then deploy:
+Sync keeps aircraft, flights, logbook, checklists, marked positions and fuel notes the same on all your devices. Sign in with a username and password, or use a private sync code with no account. Accounts need no email: a recovery code, shown once when the account is created, resets a forgotten password. The password is stretched in the browser before it is sent, and the relay keeps only a salted hash. It stores the data in a free Cloudflare KV namespace on the relay. Create the namespace once, answer yes when Wrangler offers to add it to `wrangler.toml`, then deploy:
 
 ```bash
 cd server
@@ -112,7 +115,7 @@ npx wrangler kv namespace create SYNC
 npx wrangler deploy
 ```
 
-Then open More > Sync in the app and select Create a sync code.
+Then open More > Account and sync in the app and create an account or a sync code.
 
 ## Map key
 

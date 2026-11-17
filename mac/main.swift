@@ -4,8 +4,8 @@
 import Cocoa
 import WebKit
 
-let siteURL = URL(string: "https://algophobic-dev.github.io/Kestrel-EFB/")!
-let helpURL = URL(string: "https://github.com/algophobic-dev/Kestrel-EFB#readme")!
+let siteURL = URL(string: "https://algophobic-dev.github.io/Kestrel-EFB-App/")!
+let helpURL = URL(string: "https://github.com/algophobic-dev/Kestrel-EFB-App#readme")!
 
 final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKUIDelegate, WKDownloadDelegate, WKScriptMessageHandler {
     var window: NSWindow!

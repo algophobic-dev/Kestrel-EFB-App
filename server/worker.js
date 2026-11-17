@@ -5,6 +5,7 @@
 //   GET /plate?cycle=2611&pdf=X.PDF  one FAA plate PDF, so the app can place it on the map
 //   GET /gairmet               icing, turbulence and IFR advisories as GeoJSON (aviationweather.gov)
 //   GET, PUT, DELETE /sync      device sync, stored in the SYNC KV namespace under a hash of the user's private code
+//   POST /account             username and password accounts. An account holds the sync code, so signing in links a device
 //   GET /notams?icao=KLEX       NOTAMs. Needs one secret set: SKYLINK_API_KEY (skylinkapi.com) or RAPIDAPI_KEY (SkyLink on RapidAPI),
 //                               or FAA_CLIENT_ID and FAA_CLIENT_SECRET (FAA NOTAM API)
 
@@ -32,14 +33,69 @@ async function sync(req, env, cors) {
   return json({ error: 'Use GET, PUT or DELETE' }, 405, cors);
 }
 
+// Accounts. The app stretches the password before sending it (PBKDF2, salted with the username), so the password
+// itself never reaches the relay. The relay keeps a salted hash of what it receives, and of the recovery code.
+const hex = buf => [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, '0')).join('');
+const sha = async text => hex(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text)));
+const CODE = /^[A-Z2-9]{4}(-[A-Z2-9]{4}){5}$/;
+function randomCode(groups) {
+  const abc = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789', r = crypto.getRandomValues(new Uint8Array(groups * 4));
+  return Array.from(r, (b, i) => (i && i % 4 === 0 ? '-' : '') + abc[b % 32]).join('');
+}
+// Counts attempts in the edge cache, so limits cost no storage writes. Returns true when over the limit.
+async function tooMany(origin, name, limit, seconds) {
+  const key = new Request(`${origin}/limit/${name}`), hit = await caches.default.match(key);
+  const n = hit ? +(await hit.text()) : 0;
+  if (n >= limit) return true;
+  await caches.default.put(key, new Response(String(n + 1), { headers: { 'Cache-Control': `public, max-age=${seconds}` } }));
+  return false;
+}
+async function account(req, env, cors, origin) {
+  if (!env.SYNC) return json({ error: 'Account storage is not set up. Create the SYNC KV namespace.' }, 501, cors);
+  if (req.method !== 'POST') return json({ error: 'Use POST' }, 405, cors);
+  let b; try { b = JSON.parse((await req.text()).slice(0, 2000)); } catch { return json({ error: 'Bad JSON' }, 400, cors); }
+  const user = String(b.user || '').toLowerCase(), key = String(b.key || ''), action = b.action;
+  if (!/^[a-z0-9_]{3,20}$/.test(user)) return json({ error: 'Bad username' }, 400, cors);
+  const id = 'acct:' + user, rec = await env.SYNC.get(id, 'json');
+  const badKey = !/^[0-9a-f]{64}$/.test(key);
+  const save = doc => env.SYNC.put(id, JSON.stringify(doc));
+
+  if (action === 'signup') {
+    if (badKey || !CODE.test(b.code || '')) return json({ error: 'Bad request' }, 400, cors);
+    if (rec) return json({ error: 'That username is taken' }, 409, cors);
+    const ip = await sha('ip:' + (req.headers.get('CF-Connecting-IP') || ''));
+    if (await tooMany(origin, 'signup-' + ip, 5, 86400)) return json({ error: 'Too many new accounts from this network today' }, 429, cors);
+    const salt = randomCode(4), recovery = randomCode(4);
+    await save({ salt, key: await sha(salt + key), rec: await sha(salt + recovery), code: b.code, at: Date.now() });
+    return json({ recovery }, 200, cors);
+  }
+
+  // Everything else proves who you are, with the password or the recovery code. Ten wrong tries lock the name for 15 minutes.
+  if (await tooMany(origin, 'try-' + user, 10, 900)) return json({ error: 'Too many tries. Wait 15 minutes' }, 429, cors);
+  const wrong = () => json({ error: action === 'reset' ? 'Wrong username or recovery code' : 'Wrong username or password' }, 401, cors);
+  if (!rec) return wrong();
+  if (action === 'reset') {
+    if (badKey || rec.rec !== await sha(rec.salt + String(b.recovery || '').toUpperCase())) return wrong();
+    const recovery = randomCode(4);
+    await save({ ...rec, key: await sha(rec.salt + key), rec: await sha(rec.salt + recovery) });
+    return json({ recovery, code: rec.code }, 200, cors);
+  }
+  if (badKey || rec.key !== await sha(rec.salt + key)) return wrong();
+  if (action === 'signin') return json({ code: rec.code }, 200, cors);
+  if (action === 'recovery') { const recovery = randomCode(4); await save({ ...rec, rec: await sha(rec.salt + recovery) }); return json({ recovery }, 200, cors); }
+  if (action === 'delete') { await env.SYNC.delete('u:' + await sha('kestrel-sync:' + rec.code)); await env.SYNC.delete(id); return json({ ok: true }, 200, cors); }
+  return json({ error: 'Unknown action' }, 400, cors);
+}
+
 export default {
   async fetch(req, env) {
     const url = new URL(req.url), origin = req.headers.get('Origin') || '';
     const allowed = (env.ALLOWED_ORIGINS || '*').split(',').map(s => s.trim()).filter(Boolean);
     const any = allowed.includes('*'), ok = any || allowed.includes(origin);
     const cors = { 'Access-Control-Allow-Origin': any ? '*' : ok ? origin : 'null', Vary: 'Origin' };
-    if (req.method === 'OPTIONS') return new Response(null, { headers: { ...cors, 'Access-Control-Allow-Methods': 'GET, PUT, DELETE', 'Access-Control-Allow-Headers': 'Authorization, Content-Type', 'Access-Control-Max-Age': '86400' } });
+    if (req.method === 'OPTIONS') return new Response(null, { headers: { ...cors, 'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE', 'Access-Control-Allow-Headers': 'Authorization, Content-Type', 'Access-Control-Max-Age': '86400' } });
     if (url.pathname === '/sync') return ok ? sync(req, env, cors) : json({ error: 'This origin is not allowed. Add it to ALLOWED_ORIGINS.' }, 403, cors);
+    if (url.pathname === '/account') return ok ? account(req, env, cors, url.origin) : json({ error: 'This origin is not allowed. Add it to ALLOWED_ORIGINS.' }, 403, cors);
     if (req.method !== 'GET') return json({ error: 'Use GET' }, 405, cors);
     if (!ok) return json({ error: 'This origin is not allowed. Add it to ALLOWED_ORIGINS.' }, 403, cors);
     const q = url.searchParams;

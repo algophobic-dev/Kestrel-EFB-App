@@ -1,4 +1,4 @@
-// Device sync with a private code. No email, no password.
+// Device sync with a private code, and optional username and password accounts that hold the code.
 // Each synced item (aircraft, flights, logbook, checklists, marked positions, fuel notes) carries the time it last
 // changed; when two devices disagree, the most recent change wins for that item. Data is stored on the relay
 // under a hash of the code, so the code itself is never stored there.
@@ -58,11 +58,50 @@ export async function link(code, isNew) {
   kv.setQuiet('syncStamps', isNew ? Object.fromEntries(KEYS.filter(k => localStorage.getItem('kestrel.' + k) != null).map(k => [k, Date.now()])) : {});
   await sync(); return syncState();
 }
-export function unlink() { ['syncCode', 'syncStamps', 'syncState'].forEach(k => localStorage.removeItem('kestrel.' + k)); emit('sync'); }
+export function unlink() { ['syncCode', 'syncStamps', 'syncState', 'account'].forEach(k => localStorage.removeItem('kestrel.' + k)); emit('sync'); }
 export async function deleteServerCopy() {
   const r = await fetch(relay() + '/sync', { method: 'DELETE', headers: { Authorization: 'Bearer ' + syncCode() } });
   if (!r.ok && r.status !== 404) throw new Error('The relay answered ' + r.status);
 }
+
+// ---- Accounts. An account stores the sync code on the relay, so a username and password link a new device.
+export const accountName = () => kv.get('account', '');
+export const validUser = u => /^[a-z0-9_]{3,20}$/.test(u);
+// Stretch the password here, so the relay never receives it.
+async function stretch(user, pass) {
+  const enc = new TextEncoder(), base = await crypto.subtle.importKey('raw', enc.encode(pass), 'PBKDF2', false, ['deriveBits']);
+  const bits = await crypto.subtle.deriveBits({ name: 'PBKDF2', hash: 'SHA-256', salt: enc.encode('kestrel-account:' + user), iterations: 250000 }, base, 256);
+  return Array.from(new Uint8Array(bits), b => b.toString(16).padStart(2, '0')).join('');
+}
+async function call(body) {
+  if (!CONFIG.proxyUrl) throw new Error('Accounts need the relay server');
+  let r;
+  try { r = await fetch(relay() + '/account', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }); }
+  catch { throw new Error('No connection. Try again'); }
+  const d = await r.json().catch(() => ({}));
+  if (r.status === 404 || r.status === 405) throw new Error('The relay has no accounts yet. Deploy the latest relay');
+  if (!r.ok) throw new Error(d.error || 'The relay answered ' + r.status);
+  return d;
+}
+// Each of these throws an Error with a message to show. signUp and resetPassword return the recovery code.
+export async function signUp(user, pass) {
+  const had = syncCode(), code = had || newCode();
+  const d = await call({ action: 'signup', user, key: await stretch(user, pass), code });
+  if (!had) { const s = await link(code, true); if (s.error) throw new Error(s.error); }
+  kv.setQuiet('account', user); emit('sync');
+  return d.recovery;
+}
+async function adopt(user, code) {
+  if (syncCode() !== code) { const s = await link(code, false); if (s.error) { unlink(); throw new Error(s.error); } }
+  kv.setQuiet('account', user); emit('sync');
+}
+export async function signIn(user, pass) { await adopt(user, (await call({ action: 'signin', user, key: await stretch(user, pass) })).code); }
+export async function resetPassword(user, recovery, pass) {
+  const d = await call({ action: 'reset', user, recovery, key: await stretch(user, pass) });
+  await adopt(user, d.code); return d.recovery;
+}
+export async function newRecovery(pass) { const user = accountName(); return (await call({ action: 'recovery', user, key: await stretch(user, pass) })).recovery; }
+export async function deleteAccount(pass) { const user = accountName(); await call({ action: 'delete', user, key: await stretch(user, pass) }); unlink(); }
 
 export function initSync() {
   if (syncCode()) sync();

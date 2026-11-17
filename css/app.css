@@ -45,7 +45,7 @@ button { cursor: pointer; border: 0; background: none; padding: 0; }
 .btn.danger { color: var(--bad); }
 .btn:disabled { opacity: .45; cursor: default; }
 @media (hover: hover) { .btn:not(.on):not(.primary):hover { background: var(--raised2); } }
-input[type=text], input[type=search], input[type=number], input[type=date], input[type=time], select, textarea {
+input[type=text], input[type=password], input[type=search], input[type=number], input[type=date], input[type=time], select, textarea {
   background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; min-width: 0; outline: none; }
 input:focus, select:focus, textarea:focus { border-color: var(--accent); }
 .field { display: flex; flex-direction: column; gap: 2px; font-size: 11px; color: var(--muted); min-width: 0; }
