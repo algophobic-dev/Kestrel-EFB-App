@@ -1,7 +1,7 @@
 // Flight plan panel: route chips, totals, NavLog table, terrain and airspace profile.
 import { $, $$, h, on, toast, modal } from './util.js';
 import { procs } from './db.js';
-import { autoroute } from './autoroute.js';
+import { autoroute, rnavRoute } from './autoroute.js';
 import { openExport } from './export.js';
 import { init3d, draw3d } from './view3d.js';
 import { plan, setPlan, removeToken, reverse, current, aircraft, flights } from './route.js';
@@ -231,8 +231,8 @@ async function openRoutes() {
   if (pts.length < 2 || dep.kind !== 'apt' || arr.kind !== 'apt') return toast('Enter a departure and a destination airport first.');
   const direct = dist(dep, arr), box = h('div', { class: 'list' }, h('div', { class: 'row' }, h('div', { class: 's' }, 'Finding routes.')));
   const close = modal(`Routes from ${dep.id} to ${arr.id}`, box);
-  const [low, high] = await Promise.all([autoroute(dep, arr, 'low').catch(() => null), autoroute(dep, arr, 'high').catch(() => null)]);
-  const opts = [['Direct', `${dep.id} ${arr.id}`, direct], low && ['Low airways (Victor and T routes)', low.text, low.d], high && ['High airways (Jet and Q routes)', high.text, high.d]].filter(Boolean);
+  const [rnav, low, high] = await Promise.all([rnavRoute(dep, arr).catch(() => null), autoroute(dep, arr, 'low').catch(() => null), autoroute(dep, arr, 'high').catch(() => null)]);
+  const opts = [['Direct', `${dep.id} ${arr.id}`, direct], rnav && rnav.text.split(' ').length > 2 && ['RNAV direct through waypoints (GPS)', rnav.text, rnav.d], high && ['High airways (Q routes first, then Jet)', high.text, high.d], low && ['Low airways (T routes first, then Victor)', low.text, low.d]].filter(Boolean);
   box.replaceChildren(...opts.map(([name, text, d]) => h('button', { class: 'row', onclick: () => { close(); setPlan({ text }).then(r => { fitRoute(); if (r.errors.length) toast(r.errors[0] + '.'); }); } },
     h('div', { class: 'grow' }, h('div', { class: 't' }, `${name} · ${Math.round(d)} nm${d > direct + .5 ? ` (+${Math.round(d - direct)})` : ''}`), h('div', { class: 's', style: 'white-space:normal' }, text)))),
     ...(low || high ? [] : [h('div', { class: 'row' }, h('div', { class: 's' }, 'No airway route found between these airports.'))]));

@@ -9,7 +9,6 @@
   --sat: env(safe-area-inset-top, 0px); --sab: env(safe-area-inset-bottom, 0px);
   --sal: env(safe-area-inset-left, 0px); --sar: env(safe-area-inset-right, 0px);
 }
-
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 html, body { height: 100%; margin: 0; overflow: hidden; background: var(--bg); color: var(--text);
   font: 14px/1.35 var(--font); -webkit-text-size-adjust: 100%; overscroll-behavior: none; }

@@ -48,7 +48,10 @@ export function resolve(tok, near) {
   if (ll) return { kind: 'll', id: `${(+ll[1]).toFixed(2)}/${(+ll[2]).toFixed(2)}`, name: 'Position', lat: +ll[1], lon: +ll[2] };
   const m = marks.list().find(x => x.name === tok);
   if (m) return { kind: 'mark', id: m.name, name: 'Marked position', lat: m.lat, lon: m.lon };
-  return byId.get(tok) || nearest(navBy.get(tok), near) || nearest(fixBy.get(tok), near) || byLocal.get(tok) || byId.get('K' + tok) || null;
+  const apt = byId.get(tok), other = nearest(navBy.get(tok), near) || nearest(fixBy.get(tok), near);
+  // An airport wins a shared code, unless a navaid or fix of that name is much closer to the route (MTU: Myton VOR, not an airport in Mozambique).
+  if (apt && other && near && dist(other, near) + 500 < dist(apt, near)) return other;
+  return apt || other || byLocal.get(tok) || byId.get('K' + tok) || null;
 }
 
 export function search(q, limit = 30) {
