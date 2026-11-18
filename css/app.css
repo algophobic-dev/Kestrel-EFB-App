@@ -246,6 +246,18 @@ progress { width: 100%; accent-color: var(--accent); }
   #print table.grid td, #print table.grid th { border: 1px solid #999; }
 }
 #print { display: none; }
+@media print {
+  #print .cards { display: block; } #print .card { border: 1px solid #999; margin: 0 0 8px; break-inside: avoid; background: #fff; color: #000; }
+  #print .note, #print .s, #print .card h3 { color: #333; }
+}
+/* The briefing is long: the panel takes most of the screen while it is open. */
+.fpl:has(#fpl-brief:not(.hidden)) { max-height: 90%; height: 90%; }
+#fpl-brief { flex: 1; }
+body:has(#fpl-brief:not(.hidden)) .map-tools { display: none; }
+.brief-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
+.brief-head .acts { display: flex; gap: 6px; flex-wrap: wrap; }
+.brief details summary { cursor: pointer; padding: 4px 0; font-weight: 600; }
+.dot.pirep-sev { background: #ef4444; } .dot.pirep-mod { background: #ff9f1c; } .dot.pirep-lgt { background: #f2d13a; } .dot.pirep-neg { background: #3fc35f; } .dot.pirep-none { background: #a7b5bf; }
 
 /* Marked positions, traffic */
 .chip.mark { background: #ffd166; }
@@ -254,6 +266,7 @@ progress { width: 100%; accent-color: var(--accent); }
 .tfc { position: relative; pointer-events: none; }
 .tfc span { position: absolute; left: -9px; top: -9px; width: 18px; height: 18px; display: block; }
 .tfc svg { width: 18px; height: 18px; fill: #5fe0ff; stroke: #06212b; stroke-width: 1.2; }
+.tfc.rx svg { fill: #ffd84d; stroke: #2b2206; } .tfc.rx b { color: #fff3c4; }
 .tfc b { position: absolute; left: 11px; top: -11px; font-size: 10px; line-height: 1.15; font-weight: 700; white-space: nowrap; color: #c9f4ff; text-shadow: 0 0 2px #000, 0 0 2px #000, 0 0 3px #000; }
 
 /* Airport surface labels, 3D view */

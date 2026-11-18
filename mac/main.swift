@@ -11,6 +11,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     var window: NSWindow!
     var web: WKWebView!
     var downloads: [WKDownload: URL] = [:]
+    var udpSource: DispatchSourceRead?
 
     // MARK: Launch
 
@@ -37,6 +38,38 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         NSApp.mainMenu = buildMenu()
         web.load(URLRequest(url: siteURL))
         NSApp.activate(ignoringOtherApps: true)
+        startGDL90()
+    }
+
+    // MARK: ADS-B receiver
+
+    /// Stratux, Sentry and other receivers send GDL90 over Wi-Fi to UDP port 4000. Each packet goes to the web app, which decodes it.
+    func startGDL90() {
+        let fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)
+        guard fd >= 0 else { return }
+        var yes: Int32 = 1
+        let size = socklen_t(MemoryLayout<Int32>.size)
+        setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &yes, size)
+        setsockopt(fd, SOL_SOCKET, SO_REUSEPORT, &yes, size)
+        setsockopt(fd, SOL_SOCKET, SO_BROADCAST, &yes, size)
+        var addr = sockaddr_in()
+        addr.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+        addr.sin_family = sa_family_t(AF_INET)
+        addr.sin_port = in_port_t(4000).bigEndian
+        addr.sin_addr = in_addr(s_addr: INADDR_ANY)
+        let bound = withUnsafePointer(to: &addr) { $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { Darwin.bind(fd, $0, socklen_t(MemoryLayout<sockaddr_in>.size)) } }
+        guard bound == 0 else { close(fd); return }
+        let src = DispatchSource.makeReadSource(fileDescriptor: fd, queue: .main)
+        var buf = [UInt8](repeating: 0, count: 65536)
+        src.setEventHandler { [weak self] in
+            let n = recv(fd, &buf, buf.count, 0)
+            guard n > 0, let self = self else { return }
+            let b64 = Data(buf[0..<n]).base64EncodedString()
+            self.web.evaluateJavaScript("window.Kestrel && Kestrel.gdl90 && Kestrel.gdl90('\(b64)')", completionHandler: nil)
+        }
+        src.setCancelHandler { close(fd) }
+        src.resume()
+        udpSource = src
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }

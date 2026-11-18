@@ -11,16 +11,16 @@ Provided as is, with no warranty. Data comes from public sources and is not veri
 
 | Tab | Function |
 |---|---|
-| Maps | FAA VFR sectional, terminal, IFR low and high charts, and open flightmaps VFR charts for about 20 countries in Europe and southern Africa. Airports, navaids, fixes, Class B/C/D and special use airspace, and with the relay world airspace from OpenAIP. Animated radar (worldwide outside the US at lower detail), flight category dots, SIGMETs, obstacles, terrain hazard coloring, runway and taxiway charts when zoomed in, and with the relay live traffic and icing, turbulence and IFR advisories. Tap anywhere to add a point to the route or mark a position. GPS position and track log recording. |
-| Flight plan (FPL) | Type a route (`KLUK HYK V97 CVG KCVG`). Airways, SIDs, STARs and approaches expand to their fixes (`KAPA WNGSS1 CHNGY ...`), or pick them with the Procedure button. Climb and descent are modeled from the aircraft profile. The Routes button suggests an RNAV route through waypoints along the great circle, and high and low airway routes that use Q and T routes before Jet and Victor routes. The 3D view flies the route over terrain. NavLog with winds aloft, heading, time and fuel. Profile view of terrain and airspace along the route. Export saves the route as a Garmin FPL, GPX route or PLN file, or copies the route text. |
-| Airports | METAR, TAF, D-ATIS, runways with wind components, frequencies, NOTAMs (with the relay), a fuel price note and link. |
+| Maps | FAA VFR sectional, terminal, IFR low and high charts, and open flightmaps VFR charts for about 20 countries in Europe and southern Africa. Airports, navaids, fixes, Class B/C/D and special use airspace, and with the relay world airspace from OpenAIP. TFRs in red, with full details when tapped, and PIREPs colored by turbulence and icing (with the relay). Animated radar (worldwide outside the US at lower detail), flight category dots, SIGMETs, obstacles, terrain hazard coloring, runway and taxiway charts when zoomed in, and with the relay live traffic and icing, turbulence and IFR advisories. Tap anywhere to add a point to the route or mark a position. GPS position and track log recording. |
+| Flight plan (FPL) | Type a route (`KLUK HYK V97 CVG KCVG`). Airways, SIDs, STARs and approaches expand to their fixes (`KAPA WNGSS1 CHNGY ...`), or pick them with the Procedure button. Climb and descent are modeled from the aircraft profile. The Routes button suggests an RNAV route through waypoints along the great circle, and high and low airway routes that use Q and T routes before Jet and Victor routes. The 3D view flies the route over terrain. NavLog with winds aloft, heading, time and fuel. Profile view of terrain and airspace along the route. Export saves the route as a Garmin FPL, GPX route or PLN file, or copies the route text. Brief shows a preflight briefing for the route: METAR, TAF and NOTAMs at each end, SIGMETs and G-AIRMETs the route crosses, TFRs within 10 nm, PIREPs within 40 nm, and winds aloft for each leg. It prints, and its File button copies the flight plan details and opens 1800wxbrief.com. |
+| Airports | METAR, TAF, D-ATIS, TFRs within 30 nm (with the relay), runways with wind components, frequencies, NOTAMs (with the relay), a fuel price note and link. |
 | Plates | Current FAA approach plates, departures, arrivals and airport diagrams. Save an airport's plates for offline use. Show on map places an approach plate on the map (with the relay). |
 | Imagery | Prog charts, surface analysis, radar, satellite, icing, winds aloft. |
 | Flights | Saved flights, printable NavLog, weight and balance, takeoff and landing distance estimates. |
 | ScratchPads, Checklist, Logbook, Documents | Handwritten notes with ATIS and CRAFT templates, checklists with speech, a logbook with CSV export, imported PDFs. |
 | More | Aircraft profiles, offline chart downloads, marked positions, imported map content (GeoJSON, KML), track logs with GPX export. |
 
-Not included: flight plan filing.
+Not included: filing a flight plan from inside the app. That needs a vendor agreement with Leidos Flight Service. The File at 1800wxbrief.com button copies the flight plan details and opens the filing site instead.
 
 Coverage: everything works in the US. Elsewhere you get airports, runways, frequencies, navaids, METAR, TAF and SIGMETs (METAR and TAF through the relay), radar, direct routes with winds aloft, open flightmaps charts where available, and world airspace with an OpenAIP key. FAA charts, plates, airways, procedures, obstacles and advisories cover the US only.
 
@@ -54,6 +54,16 @@ The app loads the live site, so it needs a connection and always shows the lates
 ```bash
 bash mac/build.sh
 ```
+
+## ADS-B receivers (Mac and Windows apps)
+
+The Mac and Windows apps show traffic and use the GPS position from an ADS-B receiver that sends GDL90 over Wi-Fi, such as Stratux or Sentry. Join the receiver's Wi-Fi network, then open the app. It listens on UDP port 4000 and shows "ADS-B receiver connected." Receiver traffic shows in yellow, with altitude relative to yours in hundreds of feet. While a receiver is connected, its GPS is used instead of the computer's location, and internet traffic is hidden.
+
+- Mac: allow local network access if macOS asks.
+- Windows: allow Kestrel EFB on private networks if Windows Firewall asks.
+- Stratus receivers send GDL90 only in their open mode; check the receiver's settings.
+- Weather sent by the receiver (FIS-B) is not shown yet.
+- Browsers cannot receive these packets, so this does not work in the web app on iPad, iPhone or in a browser.
 
 ## Windows app
 
@@ -102,25 +112,30 @@ Then turn on Airspace (world) in the map layers. The relay keeps each tile for a
 
 ### NOTAMs
 
-NOTAMs need a key from either source.
+NOTAMs need a key. The relay uses the first one it has, in this order.
 
-SkyLink API (skylinkapi.com): apply for the free trial (1,000 requests a month, personal use, reviewed within about a week), then store the key and deploy again:
-
-```bash
-npx wrangler secret put SKYLINK_API_KEY
-```
-
-If your SkyLink key comes from RapidAPI instead, store it as `RAPIDAPI_KEY`.
-
-Or the FAA, which requires a MyAccess identity check:
-
-1. Register at the FAA API portal (api.faa.gov) and request access to the NOTAM API. It is free; approval can take a few days.
-2. Store the two values the FAA gives you as secrets. They never go in the repository:
+**NOTAM Management Service (NMS-API).** Free. Request access from the NOTAM Service Center (7-AWA-NAIMES@faa.gov). They send a password-protected spreadsheet: KEY is the client ID and SECRET is the client secret. Store both, then deploy:
 
 ```bash
-npx wrangler secret put FAA_CLIENT_ID
-npx wrangler secret put FAA_CLIENT_SECRET
+npx wrangler secret put NMS_CLIENT_ID
+npx wrangler secret put NMS_CLIENT_SECRET
+npx wrangler deploy
 ```
+
+New accounts start on the staging (test) environment, which the relay uses by default. Once the NOTAM Service Center moves the account to production, they send production keys. Store those the same way, then point the relay at production and deploy:
+
+```bash
+npx wrangler secret put NMS_HOST
+npx wrangler deploy
+```
+
+For `NMS_HOST`, enter `https://api-nms.aim.faa.gov`.
+
+The NMS terms allow showing the NOTAMs in the app, but not describing them as FAA data.
+
+**SkyLink API** (skylinkapi.com). A free trial of 1,000 requests a month for personal use. Store the key as `SKYLINK_API_KEY`, or as `RAPIDAPI_KEY` if it comes from RapidAPI.
+
+**Older FAA NOTAM API** (api.faa.gov). Store the two values as `FAA_CLIENT_ID` and `FAA_CLIENT_SECRET`.
 
 ## Accounts and device sync (optional)
 
@@ -155,6 +170,8 @@ All free, with no paid API.
 | Winds aloft, terrain elevation | Open-Meteo |
 | Terrain hazard tiles | Mapzen terrain tiles on AWS |
 | D-ATIS | atis.info |
+| PIREPs (through the relay) | aviationweather.gov |
+| TFRs (through the relay) | tfr.faa.gov |
 | Live traffic (through the relay) | adsb.lol |
 | Base maps | CARTO and OpenStreetMap, USGS |
 | Satellite outside the US | Esri World Imagery (shown online only, not saved offline) |

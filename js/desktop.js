@@ -5,12 +5,15 @@ import { setPlan, reverse, current, plan } from './route.js';
 import { setOverlay, setChart, setBase, fitRoute, map } from './map.js';
 import { navlogTable } from './fpl.js';
 import { sync, syncCode } from './sync.js';
+import { feed } from './gdl90.js';
 
 const showFpl = () => { if ($('#fpl').classList.contains('hidden')) $('#btn-fpl').click(); };
 const onMap = fn => { emit('tab', 'maps'); return fn(); };
 
 window.Kestrel = {
   tab: id => emit('tab', id),
+  // One UDP packet from an ADS-B receiver, as base64. The Mac and Windows apps call this.
+  gdl90: feed,
   // Flight plan panel
   toggleFpl: () => onMap(() => $('#btn-fpl').click()),
   mode: m => onMap(() => { showFpl(); document.querySelector(`#fpl-mode button[data-m="${m}"]`)?.click(); }),

@@ -1,6 +1,7 @@
 // Flight plan export: Garmin FPL, GPX route, PLN, and the route as text.
 import { h, toast, modal, download } from './util.js';
 import { plan, current } from './route.js';
+import { fileFlightPlan } from './brief.js';
 
 const esc = s => String(s ?? '').replace(/[<>&"']/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&apos;' })[c]);
 const r6 = n => +n.toFixed(6);
@@ -124,13 +125,14 @@ export function openExport() {
   if (current.points.length < 2) return toast('Add at least two points before exporting.');
   const row = (label, note, run) => h('div', { class: 'row', style: 'display:flex;align-items:center;gap:12px;padding:8px 0' },
     h('div', { class: 'grow', style: 'flex:1' }, h('div', { style: 'font-weight:600' }, label), h('div', { class: 'note' }, note)),
-    h('button', { class: 'btn sm', onclick: () => { close(); run(); } }, label.startsWith('Copy') ? 'Copy' : 'Export'));
+    h('button', { class: 'btn sm', onclick: () => { close(); run(); } }, label.startsWith('Copy') ? 'Copy' : label.startsWith('File') ? 'File' : 'Export'));
   const name = baseName();
   const close = modal(`Export ${current.points[0].id} to ${current.points[current.points.length - 1].id}`, h('div', {},
     row('Garmin FPL', 'For ForeFlight, Garmin Pilot, Garmin avionics and most EFB apps.', () => save(name + '.fpl', fpl(), 'application/xml')),
     row('GPX route', 'For handheld GPS units and map apps.', () => save(name + '.gpx', gpx(), 'application/gpx+xml')),
     row('PLN', 'For apps that open .pln flight plans.', () => save(name + '.pln', pln(), 'application/xml')),
-    row('Copy route', plan.text, copyRoute)));
+    row('Copy route', plan.text, copyRoute),
+    row('File at 1800wxbrief.com', 'Copies the flight plan details and opens Leidos Flight Service to file.', fileFlightPlan)));
 }
 
 // For testing and for the Mac and Windows menus.

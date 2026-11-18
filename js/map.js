@@ -2,10 +2,12 @@
 import { $, h, icon, kv, files, on, emit, debounce, toast, esc, uid, modal } from './util.js';
 import { db, inBox, nearby, search, resolve, marks } from './db.js';
 import { along, dist, bearing, fmtLL, compass, norm, inGeom } from './geo.js';
-import { metar, sigmets, elevations, traffic, gairmets } from './wx.js';
+import { metar, sigmets, elevations, traffic, gairmets, pireps, pirepLevel, pirepText } from './wx.js';
 import { plan, setPlan, addPoint, current } from './route.js';
 import { CONFIG } from './config.js';
 import { plateImage } from './plateov.js';
+import { tfrs, tfrsAt, tfrRow } from './tfr.js';
+import { rx, connected as adsbOn } from './gdl90.js';
 
 const FAA_TILES = 'https://tiles.arcgis.com/tiles/ssFJjBXIUyZDrSYZ/arcgis/rest/services/';
 export const FAA_FEAT = 'https://services6.arcgis.com/ssFJjBXIUyZDrSYZ/arcgis/rest/services/';
@@ -30,7 +32,7 @@ export const CHARTS = {
   // Europe and southern Africa, about 20 countries. Shown only, not saved for offline use.
   ofm: { name: 'VFR Europe', url: 'https://nwy-tiles-api.prod.newaydata.com/tiles/{z}/{x}/{y}.png?path=latest/aero/latest', min: 7, max: 12, online: true, attr: '<a href="https://www.openflightmaps.org/" target="_blank" rel="noopener">open flightmaps</a>' },
 };
-const OVERLAYS = { aero: 'Airports and navaids', airspace: 'Airspace (US)', oaip: 'Airspace (world)', radar: 'Radar', cat: 'Flight category', sigmet: 'SIGMETs', ice: 'Icing advisories', turb: 'Turbulence advisories', ifr: 'IFR advisories', hazard: 'Terrain hazard', obstacles: 'Obstacles', traffic: 'Traffic' };
+const OVERLAYS = { aero: 'Airports and navaids', airspace: 'Airspace (US)', oaip: 'Airspace (world)', radar: 'Radar', cat: 'Flight category', sigmet: 'SIGMETs', pirep: 'PIREPs', tfr: 'TFRs', ice: 'Icing advisories', turb: 'Turbulence advisories', ifr: 'IFR advisories', hazard: 'Terrain hazard', obstacles: 'Obstacles', traffic: 'Traffic' };
 // US radar from Iowa Environmental Mesonet. Elsewhere, RainViewer (zoom 7 at most, 10-minute frames).
 const RADAR = o => `https://mesonet.agron.iastate.edu/cache/tile.py/1.0.0/nexrad-n0q-900913${o ? '-m' + String(o).padStart(2, '0') + 'm' : ''}/{z}/{x}/{y}.png`;
 const RV_ATTR = 'Weather data by <a href="https://www.rainviewer.com/" target="_blank" rel="noopener">RainViewer</a>';
@@ -48,9 +50,11 @@ async function rvFrames() {
 const RV = f => `${rv.host}${f.path}/256/{z}/{x}/{y}/2/1_1.png`;
 
 const st = Object.assign({ base: 'dark', chart: 'none', ov: { aero: true, airspace: true, radar: false, cat: true, sigmet: false }, c: [39.1, -84.5], z: 8 }, kv.get('map', {}));
+// TFRs are on unless turned off, also for maps saved before the layer existed.
+st.ov.tfr ??= true;
 const save = () => kv.set('map', st);
 export let map;
-let baseL, chartL, radarL, radarSrc, oaipL, aeroL, routeL, airspaceL, sigmetL, ownL, canvas, hazardL, obsL, trafficL, marksL, contentL, advisL, surfL;
+let pirepL, pirepData = null, tfrL, tfrData = null, baseL, chartL, radarL, radarSrc, oaipL, aeroL, routeL, airspaceL, sigmetL, ownL, canvas, hazardL, obsL, trafficL, marksL, contentL, advisL, surfL;
 const cats = new Map(), markers = new Map();
 
 export const altText = (v, uom, code) => code === 'SFC' || (v === 0 && code !== 'MSL') ? 'Surface' : v == null || v < 0 ? (code || 'Unknown') : uom === 'FL' ? 'FL' + v : `${Number(v).toLocaleString()}' ${code || 'MSL'}`;
@@ -62,7 +66,7 @@ export function initMap() {
   canvas = L.canvas({ padding: .3 });
   map.createPane('wx').style.zIndex = 350;
   airspaceL = L.layerGroup().addTo(map); sigmetL = L.layerGroup().addTo(map);
-  advisL = L.layerGroup().addTo(map); surfL = L.layerGroup().addTo(map);
+  advisL = L.layerGroup().addTo(map); tfrL = L.layerGroup().addTo(map); pirepL = L.layerGroup().addTo(map); surfL = L.layerGroup().addTo(map);
   contentL = L.layerGroup().addTo(map); obsL = L.layerGroup().addTo(map);
   routeL = L.layerGroup().addTo(map); aeroL = L.layerGroup().addTo(map); marksL = L.layerGroup().addTo(map); trafficL = L.layerGroup().addTo(map);
   applyTiles(); applyOverlays();
@@ -142,7 +146,7 @@ function applyOverlays() {
   $('#timebar').classList.toggle('hidden', !st.ov.radar);
   $('#map-clock').classList.toggle('hidden', !st.ov.radar);
   makeRadar(); setOaip();
-  drawAero(); loadAirspace(); loadSigmets();
+  drawAero(); loadAirspace(); loadSigmets(); loadTfrs(); loadPireps();
   hazardL?.remove(); hazardL = null; hazardAt = null;
   if (st.ov.hazard) { hazardL = new Hazard({ pane: 'wx', maxNativeZoom: 11, minZoom: 6, attribution: 'Terrain: Mapzen' }).addTo(map); hazardAt = hazardRef(); }
   loadObstacles(); setTraffic(); loadAdvisories(); loadSurface();
@@ -283,19 +287,42 @@ function startGPS() {
   if (watch != null) return true;
   if (!navigator.geolocation) { toast('This device has no location service.'); return false; }
   watch = navigator.geolocation.watchPosition(pos => {
+    // An ADS-B receiver's GPS, when one is connected, is used instead of the device's own location.
+    if (adsbOn() && rx.own) return;
     const c = pos.coords;
+    setOwn({ lat: c.latitude, lon: c.longitude, alt: c.altitude != null ? c.altitude * 3.28084 : null, gs: c.speed != null ? c.speed * 1.94384 : null, t: pos.timestamp,
+      trk: c.heading != null && !isNaN(c.heading) && (c.speed || 0) > 1 ? c.heading : null });
+  }, err => { toast(err.code === 1 ? 'Location access is off. Allow it in your browser settings.' : 'Waiting for a position fix.'); }, { enableHighAccuracy: true, maximumAge: 2000 });
+  return true;
+}
+function setOwn(o) {
     const prev = own;
-    own = { lat: c.latitude, lon: c.longitude, alt: c.altitude != null ? c.altitude * 3.28084 : null, gs: c.speed != null ? c.speed * 1.94384 : null, t: pos.timestamp };
-    own.trk = c.heading != null && !isNaN(c.heading) && (c.speed || 0) > 1 ? c.heading : prev && dist(prev, own) > .01 ? bearing(prev, own) : prev?.trk || 0;
+    own = o;
+    own.trk = o.trk != null ? o.trk : prev && dist(prev, own) > .01 ? bearing(prev, own) : prev?.trk || 0;
     if (!ownL) ownL = L.marker([own.lat, own.lon], { interactive: false, zIndexOffset: 1000, icon: L.divIcon({ className: '', iconSize: [0, 0], html: `<div class="own">${PLANE}</div>` }) }).addTo(map);
     ownL.setLatLng([own.lat, own.lon]);
     const el = ownL.getElement()?.firstChild; if (el) el.style.transform = `rotate(${own.trk}deg)`;
     if (follow) map.panTo([own.lat, own.lon], { animate: true });
     if (rec) { rec.pts.push([+own.lat.toFixed(5), +own.lon.toFixed(5), Math.round(own.alt || 0), Math.round(own.gs || 0), own.t]); ownTrack?.addLatLng([own.lat, own.lon]); }
     emit('gps', own);
-  }, err => { toast(err.code === 1 ? 'Location access is off. Allow it in your browser settings.' : 'Waiting for a position fix.'); }, { enableHighAccuracy: true, maximumAge: 2000 });
-  return true;
 }
+
+// ---------- ADS-B receiver: its GPS position and the traffic it hears
+let adsbL = null;
+on('adsb', r => {
+  if (!map) return;
+  if (r.own) setOwn({ lat: r.own.lat, lon: r.own.lon, alt: r.geoAlt ?? r.own.alt, gs: r.own.gs, trk: r.own.track, t: r.own.t });
+  adsbL ||= L.layerGroup().addTo(map);
+  adsbL.clearLayers();
+  for (const a of r.traffic.values()) {
+    if (r.own && a.addr === r.own.addr) continue;
+    const rel = r.own?.alt != null && a.alt != null ? Math.round((a.alt - r.own.alt) / 100) : null;
+    const alt = rel != null ? (rel >= 0 ? '+' : '−') + String(Math.abs(rel)).padStart(2, '0') : a.alt != null ? String(Math.round(a.alt / 100)).padStart(3, '0') : '';
+    const arrow = a.vs > 300 ? '↑' : a.vs < -300 ? '↓' : '';
+    L.marker([a.lat, a.lon], { interactive: false, keyboard: false, icon: L.divIcon({ className: '', iconSize: [0, 0],
+      html: `<div class="tfc rx"><span style="transform:rotate(${Math.round(a.track || 0)}deg)">${PLANE}</span><b>${esc(a.flight || '')}<br>${alt}${arrow}</b></div>` }) }).addTo(adsbL);
+  }
+});
 function setFollow(v) {
   if (v && !startGPS()) return;
   follow = v; $('#tool-follow').classList.toggle('on', v);
@@ -352,7 +379,7 @@ export async function inspect(p, focus) {
       h('div', { class: 'sect' }, 'Location'),
       h('div', { class: 'row' }, h('div', { class: 'grow' }, h('div', { class: 't' }, fmtLL(p.lat, p.lon)), locSub), h('button', { class: 'pill', title: 'Save this spot as a named position', onclick: () => markAt(p) }, 'Mark'), h('button', { class: 'pill go', onclick: () => add({ kind: 'll', ...p }) }, 'Add')),
       h('div', { class: 'sect' }, 'Airspace'), asBox,
-      obsRows(p, rad), advisRows(p),
+      tfrRowsAt(p), pirepRows(p, rad), obsRows(p, rad), advisRows(p),
       h('div', { class: 'sect' }, 'Nearby'),
       near.length ? near.map(rowFor) : h('div', { class: 'row' }, h('div', { class: 's' }, 'Nothing nearby. Zoom in to see fixes.'))));
   box.classList.remove('hidden');
@@ -444,7 +471,8 @@ function obsRows(p, rad) {
 // ---------- live traffic (needs the relay server in CONFIG.proxyUrl)
 let trafficTimer = null;
 async function loadTraffic() {
-  if (!st.ov.traffic || document.hidden || !$('#v-maps').classList.contains('active')) return;
+  // With a receiver connected, its own traffic is shown instead of internet traffic.
+  if (!st.ov.traffic || document.hidden || !$('#v-maps').classList.contains('active') || adsbOn()) { if (adsbOn()) trafficL.clearLayers(); return; }
   const c = map.getCenter(), b = map.getBounds();
   const r = Math.min(250, Math.max(10, dist({ lat: b.getNorth(), lon: b.getWest() }, { lat: c.lat, lon: c.lng })));
   let list; try { list = await traffic(c.lat, c.lng, r); } catch { return; }
@@ -486,6 +514,43 @@ async function drawContent() {
     L.geoJSON(gj, { renderer: canvas, interactive: false, style: { color: '#ffb020', weight: 2.5, fillOpacity: .12 },
       pointToLayer: (f, ll) => L.circleMarker(ll, { renderer: canvas, radius: 5, color: '#10161a', weight: 1, fillColor: '#ffb020', fillOpacity: 1, interactive: false }) }).addTo(contentL);
   }
+}
+
+// ---------- PIREPs (through the relay)
+export const PIREP_COLOR = { sev: '#ef4444', mod: '#ff9f1c', lgt: '#f2d13a', neg: '#3fc35f', '': '#a7b5bf' };
+async function loadPireps() {
+  pirepL.clearLayers(); pirepData = null;
+  if (!st.ov.pirep) return;
+  if (!CONFIG.proxyUrl) { st.ov.pirep = false; save(); return toast('PIREPs need the relay server. See the README to set it up.'); }
+  try { pirepData = await pireps(); } catch (e) { return toast(e.message + '.'); }
+  if (!st.ov.pirep) return;
+  pirepL.clearLayers();
+  for (const f of pirepData.features) {
+    const [lon, lat] = f.geometry.coordinates, lv = pirepLevel(f.properties);
+    L.circleMarker([lat, lon], { renderer: canvas, interactive: false, radius: lv === 'sev' ? 7 : 5, color: '#10161a', weight: 1.5, fillColor: PIREP_COLOR[lv], fillOpacity: 1 }).addTo(pirepL);
+  }
+}
+setInterval(() => { if (st.ov.pirep) loadPireps(); }, 5 * 6e4);
+function pirepRows(p, rad) {
+  if (!pirepData) return [];
+  const hit = pirepData.features.map(f => ({ q: f.properties, d: dist(p, { lat: f.geometry.coordinates[1], lon: f.geometry.coordinates[0] }) })).filter(x => x.d <= Math.max(rad, 10)).sort((a, b) => a.d - b.d).slice(0, 6);
+  return hit.length ? [h('div', { class: 'sect' }, 'PIREPs'), ...hit.map(({ q }) => h('div', { class: 'row' }, h('span', { class: 'dot', style: `background:${PIREP_COLOR[pirepLevel(q)]}` }),
+    h('div', { class: 'grow' }, h('div', { class: 't' }, pirepText(q) || q.airepType), h('div', { class: 's', style: 'white-space:normal' }, `${q.rawOb} · ${Math.round((Date.now() - Date.parse(q.obsTime)) / 6e4)} min ago`))))] : [];
+}
+
+// ---------- TFRs (through the relay)
+async function loadTfrs() {
+  tfrL.clearLayers(); tfrData = null;
+  if (!st.ov.tfr || !CONFIG.proxyUrl) return;
+  try { tfrData = await tfrs(); } catch { return toast('TFRs did not load. Check your connection.'); }
+  if (!st.ov.tfr) return;
+  tfrL.clearLayers();
+  L.geoJSON(tfrData, { renderer: canvas, interactive: false, style: { color: '#ff4d4d', weight: 2, fillColor: '#ff4d4d', fillOpacity: .16 } }).addTo(tfrL);
+}
+setInterval(() => { if (st.ov.tfr) loadTfrs(); }, 10 * 6e4);
+function tfrRowsAt(p) {
+  const hit = tfrData ? tfrsAt(tfrData, p) : [];
+  return hit.length ? [h('div', { class: 'sect' }, 'TFRs'), ...hit.map(t => tfrRow(t))] : [];
 }
 
 // ---------- G-AIRMET advisories: icing, turbulence, IFR (through the relay)

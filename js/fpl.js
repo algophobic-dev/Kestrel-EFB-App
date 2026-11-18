@@ -3,6 +3,7 @@ import { $, $$, h, on, toast, modal } from './util.js';
 import { procs } from './db.js';
 import { autoroute, rnavRoute } from './autoroute.js';
 import { openExport } from './export.js';
+import { drawBrief } from './brief.js';
 import { init3d, draw3d } from './view3d.js';
 import { plan, setPlan, removeToken, reverse, current, aircraft, flights } from './route.js';
 import { along, dist, fmtDur, pad3, inGeom } from './geo.js';
@@ -51,6 +52,7 @@ function render(r) {
   if (mode === 'navlog') $('#fpl-navlog').replaceChildren(navlogTable(r));
   if (mode === 'profile' && !r.windPending) drawProfile(r);
   if (mode === '3d' && !r.windPending) draw3d();
+  if (mode === 'brief' && !r.windPending) drawBrief($('#fpl-brief'));
 }
 
 function setMode(m) {
@@ -60,6 +62,7 @@ function setMode(m) {
   $('#fpl-navlog').classList.toggle('hidden', m !== 'navlog');
   $('#fpl-profile').classList.toggle('hidden', m !== 'profile');
   $('#fpl-3d').classList.toggle('hidden', m !== '3d');
+  $('#fpl-brief').classList.toggle('hidden', m !== 'brief');
   render(current);
 }
 

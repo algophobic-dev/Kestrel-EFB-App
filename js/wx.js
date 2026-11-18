@@ -181,3 +181,25 @@ export const gairmets = () => cached('gairmet', 10, async () => {
   if (!r.ok) throw new Error(r.status === 404 ? 'The relay is out of date. Run npx wrangler deploy in the server folder' : 'Advisories did not load');
   return r.json();
 });
+
+// PIREPs and AIREPs from the last 2 hours, through the relay.
+export const pireps = () => cached('pirep', 5, async () => {
+  const r = await fetch(`${relay()}/pirep`);
+  if (!r.ok) throw new Error(r.status === 404 ? 'The relay is out of date. Run npx wrangler deploy in the server folder' : 'PIREPs did not load');
+  return r.json();
+});
+// Worst turbulence or icing in a report: sev, mod, lgt, neg, or '' when it reports neither.
+const LEVEL = { NEG: 'neg', TRC: 'lgt', LGT: 'lgt', 'TRC-LGT': 'lgt', 'LGT-MOD': 'mod', MOD: 'mod', 'MOD-SEV': 'sev', SEV: 'sev', 'SEV-EXTM': 'sev', EXTM: 'sev' };
+const RANK = ['', 'neg', 'lgt', 'mod', 'sev'];
+export function pirepLevel(q) {
+  let best = q.airepType === 'Urgent PIREP' ? 'sev' : '';
+  for (const v of [q.tbInt1, q.tbInt2, q.icgInt1, q.icgInt2]) { const l = LEVEL[v] || ''; if (RANK.indexOf(l) > RANK.indexOf(best)) best = l; }
+  return best;
+}
+// One plain line: altitude, aircraft, then what was reported.
+export function pirepText(q) {
+  const alt = q.fltlvl == null ? '' : q.fltlvl === 0 ? 'Surface' : q.fltlvl >= 180 ? 'FL' + q.fltlvl : `${(q.fltlvl * 100).toLocaleString()}'`;
+  const wx = [q.tbInt1 && `turbulence ${q.tbInt1.toLowerCase()}${q.tbType1 ? ' ' + q.tbType1.toLowerCase() : ''}`, q.icgInt1 && `icing ${q.icgInt1.toLowerCase()}${q.icgType1 ? ' ' + q.icgType1.toLowerCase() : ''}`,
+    q.temp != null && `${q.temp}°C`, q.wspd != null && q.wdir != null && `wind ${String(q.wdir).padStart(3, '0')}° ${q.wspd} kt`].filter(Boolean);
+  return [q.airepType === 'Urgent PIREP' ? 'URGENT' : '', alt, q.acType, wx.join(', ')].filter(Boolean).join(' · ');
+}

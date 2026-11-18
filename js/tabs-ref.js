@@ -4,6 +4,7 @@ import { search, airport, runways, freqs, plates, magvar, part } from './db.js';
 import { metar, taf, datis, rawWx, notams, hasRelay } from './wx.js';
 import { fmtLL, norm } from './geo.js';
 import { addPoint } from './route.js';
+import { tfrsNear, tfrRow } from './tfr.js';
 import { flyTo, inspect, showPlate } from './map.js';
 
 const recent = { list: () => kv.get('recentApts', []), add(id) { kv.set('recentApts', [id, ...recent.list().filter(x => x !== id)].slice(0, 15)); } };
@@ -46,6 +47,7 @@ export const Airports = {
         onclick: () => { navigator.clipboard?.writeText(notamId).then(() => toast(`${notamId} copied. Paste it into the FAA search box.`)).catch(() => { }); } }, `Open FAA NOTAM Search for ${notamId}`),
       h('div', { class: 'note', style: 'margin-top:6px' }, `Copies ${notamId} so you only paste it and press Search.`));
     const notamBox = h('div', {}, hasRelay() ? 'Loading NOTAMs.' : notamLink());
+    const tfrBox = h('div', {}, 'Loading TFRs.');
     const fuelNote = h('input', { type: 'text', placeholder: 'For example 100LL 6.45 self-serve', value: kv.get('fuelNotes', {})[a.id] || '', style: 'width:100%',
       onchange: e => { const n = kv.get('fuelNotes', {}); e.target.value.trim() ? n[a.id] = e.target.value.trim() : delete n[a.id]; kv.set('fuelNotes', n); toast('Fuel note saved on this device.'); } });
     let gotRaw = false;
@@ -57,6 +59,7 @@ export const Airports = {
           h('button', { class: 'btn sm', onclick: () => emit('open-plates', a.id) }, 'Plates'))),
       h('div', { class: 'cards' },
         card('METAR', wxBox), card('TAF', tafBox), datisCard,
+        hasRelay() && card('TFRs within 30 nm', tfrBox),
         card('Airport', kvRow('Type', a.typeName), kvRow('Elevation', `${a.elev.toLocaleString()}' MSL`), kvRow('Position', fmtLL(a.lat, a.lon)),
           kvRow('Variation', `${Math.abs(mv).toFixed(0)}°${mv >= 0 ? 'E' : 'W'}`), a.local && kvRow('FAA identifier', a.local),
           ),
@@ -80,6 +83,9 @@ export const Airports = {
     }).catch(() => { });
     if (hasRelay()) {
       if (a.wx) rawWx(a.wxId).then(r => { if (this.cur !== cur) return; if (r.metar) { gotRaw = true; wxBox.textContent = r.metar; } if (r.taf) tafBox.textContent = r.taf; }).catch(() => { });
+      tfrsNear(a, 30).then(list => { if (this.cur !== cur) return;
+        tfrBox.replaceChildren(...(list.length ? list.map(t => tfrRow(t, t.d ? ` · ${t.d.toFixed(0)} nm away` : ' · over the airport')) : ['No TFRs within 30 nm.']));
+      }).catch(() => { if (this.cur === cur) tfrBox.replaceChildren('TFRs did not load. Check your connection.'); });
       notams(notamId).then(list => { if (this.cur !== cur) return;
         notamBox.replaceChildren(...(list.length ? list.map(n => h('pre', { class: 'raw', style: 'padding:6px 0;border-bottom:1px solid var(--line)' }, n.text)) : ['No NOTAMs for this airport.']));
       }).catch(() => { if (this.cur === cur) notamBox.replaceChildren(notamLink()); });

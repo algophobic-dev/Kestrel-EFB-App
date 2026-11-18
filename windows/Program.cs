@@ -6,6 +6,8 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
 using System.IO;
+using System.Net;
+using System.Net.Sockets;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using Microsoft.Web.WebView2.Core;
@@ -97,6 +99,35 @@ sealed class MainForm : Form
             if (shortcuts.TryGetValue(e.KeyData, out item)) { item.PerformClick(); e.Handled = true; e.SuppressKeyPress = true; }
         };
         core.Navigate(SiteUrl);
+        StartGdl90();
+    }
+
+    // ---- ADS-B receiver
+
+    UdpClient udp;
+    /// Stratux, Sentry and other receivers send GDL90 over Wi-Fi to UDP port 4000. Each packet goes to the web app, which decodes it.
+    void StartGdl90()
+    {
+        try
+        {
+            udp = new UdpClient();
+            udp.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
+            udp.EnableBroadcast = true;
+            udp.Client.Bind(new IPEndPoint(IPAddress.Any, 4000));
+        }
+        catch (Exception) { udp = null; return; }
+        FormClosed += (s, e) => { UdpClient u = udp; udp = null; try { u.Close(); } catch (Exception) { } };
+        Task.Run(async () =>
+        {
+            while (udp != null)
+            {
+                UdpReceiveResult got;
+                try { got = await udp.ReceiveAsync(); } catch (Exception) { return; }
+                string b64 = Convert.ToBase64String(got.Buffer);
+                try { BeginInvoke((Action)(() => { if (web.CoreWebView2 != null) web.CoreWebView2.ExecuteScriptAsync("window.Kestrel && Kestrel.gdl90 && Kestrel.gdl90('" + b64 + "')"); })); }
+                catch (Exception) { return; }
+            }
+        });
     }
 
     static void OpenExternal(string url)
@@ -197,7 +228,7 @@ sealed class MainForm : Form
 
         strip.Items.Add(Menu("&Help",
             Item("Kestrel EFB &Help", () => OpenExternal(Help), Keys.F1),
-            Item("&About Kestrel EFB", () => MessageBox.Show(this, "Kestrel EFB 1.2\nFree flight planning for pilots.", "About Kestrel EFB", MessageBoxButtons.OK, MessageBoxIcon.Information))));
+            Item("&About Kestrel EFB", () => MessageBox.Show(this, "Kestrel EFB 1.3\nFree flight planning for pilots.", "About Kestrel EFB", MessageBoxButtons.OK, MessageBoxIcon.Information))));
         return strip;
     }
 

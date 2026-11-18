@@ -6,12 +6,16 @@
 //   GET /metar?ids=EGLL,RJTT  decoded METARs as JSON, worldwide (aviationweather.gov)
 //   GET /taf?ids=EGLL         TAFs as JSON, worldwide (aviationweather.gov)
 //   GET /isigmet              SIGMETs outside the US as GeoJSON (aviationweather.gov)
+//   GET /pirep                 PIREPs from the last 2 hours, worldwide, as GeoJSON (aviationweather.gov)
+//   GET /tfr                   active TFRs with their shapes, as GeoJSON (tfr.faa.gov)
+//   GET /tfr/text?id=6/8596     one TFR's full text: times, altitudes, restrictions
 //   GET /oaip/{z}/{x}/{y}.png  OpenAIP airspace map tiles. Needs one secret set: OPENAIP_KEY (openaip.net, free)
 //   GET /gairmet               icing, turbulence and IFR advisories as GeoJSON (aviationweather.gov)
 //   GET, PUT, DELETE /sync      device sync, stored in the SYNC KV namespace under a hash of the user's private code
 //   POST /account             username and password accounts. An account holds the sync code, so signing in links a device
-//   GET /notams?icao=KLEX       NOTAMs. Needs one secret set: SKYLINK_API_KEY (skylinkapi.com) or RAPIDAPI_KEY (SkyLink on RapidAPI),
-//                               or FAA_CLIENT_ID and FAA_CLIENT_SECRET (FAA NOTAM API)
+//   GET /notams?icao=KLEX       NOTAMs. Needs one secret set: NMS_CLIENT_ID and NMS_CLIENT_SECRET (NOTAM Management Service,
+//                               optional NMS_HOST), SKYLINK_API_KEY (skylinkapi.com) or RAPIDAPI_KEY (SkyLink on RapidAPI),
+//                               or FAA_CLIENT_ID and FAA_CLIENT_SECRET (older FAA NOTAM API)
 
 const json = (body, status, headers, maxAge = 0) => new Response(JSON.stringify(body), {
   status, headers: { ...headers, 'Content-Type': 'application/json', 'Cache-Control': maxAge ? `public, max-age=${maxAge}` : 'no-store' },
@@ -39,6 +43,17 @@ async function sync(req, env, cors) {
 
 // Accounts. The app stretches the password before sending it (PBKDF2, salted with the username), so the password
 // itself never reaches the relay. The relay keeps a salted hash of what it receives, and of the recovery code.
+// NOTAM Management Service bearer token. It lasts 30 minutes; it is renewed 2 minutes early.
+let nmsCache = null;
+async function nmsToken(env, host) {
+  if (nmsCache && nmsCache.host === host && nmsCache.until > Date.now()) return nmsCache.token;
+  const r = await fetch(`${host}/v1/auth/token`, { method: 'POST', body: 'grant_type=client_credentials',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded', Authorization: 'Basic ' + btoa(`${env.NMS_CLIENT_ID}:${env.NMS_CLIENT_SECRET}`) } });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok || !j.access_token) throw new Error(`NOTAM sign-in failed (${r.status})`);
+  nmsCache = { host, token: j.access_token, until: Date.now() + ((+j.expires_in || 1799) - 120) * 1000 };
+  return nmsCache.token;
+}
 const hex = buf => [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, '0')).join('');
 const sha = async text => hex(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text)));
 const CODE = /^[A-Z2-9]{4}(-[A-Z2-9]{4}){5}$/;
@@ -157,6 +172,40 @@ export default {
         return new Response(png, { headers: head });
       }
 
+      // PIREPs and AIREPs from the last 2 hours, worldwide, as GeoJSON.
+      if (url.pathname === '/pirep') {
+        const r = await fetch('https://aviationweather.gov/api/data/pirep?format=geojson&age=2&bbox=-90,-180,90,180', { headers: { 'User-Agent': 'kestrel-efb-relay' } });
+        return new Response(r.status === 204 ? '{"type":"FeatureCollection","features":[]}' : await r.text(), { status: r.ok ? 200 : 502, headers: { ...cors, 'Content-Type': 'application/json', 'Cache-Control': 'public, max-age=300' } });
+      }
+
+      // TFRs from tfr.faa.gov: the active list joined to the shapes, so expired shapes are left out.
+      if (url.pathname === '/tfr') {
+        const ua = { headers: { 'User-Agent': 'kestrel-efb-relay' } };
+        const [list, geo] = await Promise.all([
+          fetch('https://tfr.faa.gov/tfrapi/exportTfrList', ua).then(r => r.json()),
+          fetch('https://tfr.faa.gov/geoserver/TFR/ows?service=WFS&version=1.1.0&request=GetFeature&typeName=TFR:V_TFR_LOC&maxFeatures=1000&outputFormat=application/json&srsname=EPSG:4326', ua).then(r => r.json())]);
+        const active = new Map(list.map(t => [t.notam_id, t]));
+        const features = (geo.features || []).map(f => {
+          const id = (f.properties?.NOTAM_KEY || '').split('-')[0], t = active.get(id);
+          return t && f.geometry ? { type: 'Feature', geometry: f.geometry, properties: { id, type: t.type || f.properties.LEGAL || '', title: t.description || f.properties.TITLE || '', facility: t.facility || '' } } : null;
+        }).filter(Boolean);
+        return json({ type: 'FeatureCollection', features }, 200, cors, 600);
+      }
+      if (url.pathname === '/tfr/text') {
+        const id = q.get('id') || '';
+        if (!/^\d\/\d{1,5}$/.test(id)) return json({ error: 'Bad id' }, 400, cors);
+        const r = await fetch(`https://tfr.faa.gov/tfrapi/getWebText?notamId=${id}`, { headers: { 'User-Agent': 'kestrel-efb-relay' } });
+        if (!r.ok) return json({ error: `TFR site answered ${r.status}` }, 502, cors);
+        const raw = ((await r.json().catch(() => []))[0] || {}).text || '';
+        const text = raw.replace(/<br\s*\/?>|<\/tr>|<\/p>/gi, '\n').replace(/<[^>]+>/g, ' ')
+          .replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;|&apos;/g, "'").replace(/&ordm;|&#186;|&#xBA;/gi, '°')
+          .replace(/&#x([0-9a-f]+);/gi, (m, n) => String.fromCharCode(parseInt(n, 16))).replace(/&#(\d+);/g, (m, n) => String.fromCharCode(+n))
+          .split('\n').map(l => l.replace(/\s+/g, ' ').trim()).filter(l => l && !/^(Top|Jump To:|Download shapefiles|ENDSECTION\d*|Affected Areas|Operating Restrictions and Requirements|Other Information)$/.test(l))
+          // "Ending Date and Time :" then the value on the next line becomes one line.
+          .reduce((out, l) => { const last = out[out.length - 1]; if (last && /:$/.test(last) && !/:$/.test(l) && l.length < 160) out[out.length - 1] = last.replace(/\s*:$/, ': ') + l; else out.push(l); return out; }, []).join('\n');
+        return json({ id, text }, text ? 200 : 404, cors, 600);
+      }
+
       if (url.pathname === '/gairmet') {
         const r = await fetch('https://aviationweather.gov/api/data/gairmet?format=geojson', { headers: { 'User-Agent': 'kestrel-efb-relay' } });
         return new Response(await r.text(), { status: r.ok ? 200 : 502, headers: { ...cors, 'Content-Type': 'application/json', 'Cache-Control': 'public, max-age=600' } });
@@ -169,7 +218,37 @@ export default {
         const cacheKey = new Request(`${url.origin}/notams-cache/${icao}`), hit = await caches.default.match(cacheKey);
         if (hit) return json(await hit.json(), 200, cors, 600);
         let items;
-        if (env.SKYLINK_API_KEY || env.RAPIDAPI_KEY) {
+        if (env.NMS_CLIENT_ID && env.NMS_CLIENT_SECRET) {
+          // NOTAM Management Service (NMS-API). NMS_HOST picks the environment: staging by default, production once approved.
+          const host = (env.NMS_HOST || 'https://api-staging.cgifederal-aim.com').replace(/\/$/, '');
+          const r = await fetch(`${host}/nmsapi/v1/notams?location=${icao}`, { headers: { Authorization: 'Bearer ' + await nmsToken(env, host), nmsResponseFormat: 'GEOJSON' } });
+          if (r.status === 401) nmsCache = null;
+          if (!r.ok) return json({ error: `NOTAM service answered ${r.status}` }, 502, cors);
+          const now = Date.now();
+          items = ((await r.json()).data?.geojson || []).map(f => {
+            const core = f.properties?.coreNOTAMData || {}, n = core.notam || {}, tr = core.notamTranslation || [];
+            const local = tr.find(t => t.type === 'LOCAL_FORMAT')?.simpleText, icaoTxt = tr.find(t => t.type === 'ICAO')?.formattedText;
+            // Type C is a cancellation notice, not a NOTAM in force.
+            const gone = n.type === 'C' || / NOTAMC /.test(icaoTxt || '') || (n.cancelationDate && Date.parse(n.cancelationDate) < now);
+            return { id: n.number || '', text: local || n.text || icaoTxt || '', start: n.effectiveStart || '', end: n.effectiveEnd || '', cls: n.classification || '', gone,
+              key: (n.text || local || icaoTxt || '').replace(/\s+/g, ' ').trim(), local: !!local };
+          }).filter(n => n.text && !n.gone && !(n.end && Date.parse(n.end) < now));
+          // Most US NOTAMs come twice, as a domestic and an international copy of the same text. Keep one, preferring the copy in the short local form.
+          items.sort((a, b) => b.local - a.local);
+          const seen = new Set(); items = items.filter(n => !seen.has(n.key) && seen.add(n.key));
+          // The international copy often drops the "!IAD 10/248 IAD OBST" prefix and the time range, so also match on the body alone.
+          const flat = s => s.replace(/\s+/g, ' ').trim();
+          const bodies = new Set();
+          for (const n of items) if (n.local) {
+            const w = flat(n.text).replace(/ \d{10}(EST)?-(\d{10}(EST)?|PERM)$/, '').replace(/^!\S+ \S+ /, '').split(' ');
+            for (let k = 0; k <= 2 && k < w.length; k++) bodies.add(w.slice(k).join(' '));
+          }
+          // The domestic copy can also end with the schedule ("WED 1600-1700", "DLY SR-SS"), which the international copy keeps elsewhere.
+          const byStart = new Map();
+          for (const b of bodies) { const k = b.split(' ', 3).join(' '); byStart.set(k, [...(byStart.get(k) || []), b]); }
+          const copy = t => bodies.has(t) || (byStart.get(t.split(' ', 3).join(' ')) || []).some(b => b.startsWith(t + ' ') && b.length - t.length <= 60);
+          items = items.filter(n => n.local || !copy(flat(n.text))).map(({ gone, key, local, ...n }) => n);
+        } else if (env.SKYLINK_API_KEY || env.RAPIDAPI_KEY) {
           // SkyLink sells the same data directly and through RapidAPI; only the address and header differ.
           const r = env.SKYLINK_API_KEY
             ? await fetch(`https://data.skylinkapi.com/v3.1/notams/${icao}`, { headers: { 'x-api-key': env.SKYLINK_API_KEY } })
@@ -183,13 +262,13 @@ export default {
             const core = i.properties?.coreNOTAMData || {}, n = core.notam || {}, tr = (core.notamTranslation || [])[0] || {};
             return { id: n.number || n.id || '', text: n.text || tr.formattedText || tr.simpleText || '', start: n.effectiveStart || '', end: n.effectiveEnd || '', cls: n.classification || '' };
           }).filter(n => n.text);
-        } else return json({ error: 'The relay has no NOTAM key yet. Add SKYLINK_API_KEY or RAPIDAPI_KEY, or FAA_CLIENT_ID and FAA_CLIENT_SECRET' }, 501, cors);
+        } else return json({ error: 'The relay has no NOTAM key yet. Add NMS_CLIENT_ID and NMS_CLIENT_SECRET' }, 501, cors);
         await caches.default.put(cacheKey, new Response(JSON.stringify({ items }), { headers: { 'Content-Type': 'application/json', 'Cache-Control': 'public, max-age=1800' } }));
         return json({ items }, 200, cors, 600);
       }
     } catch (e) {
       return json({ error: 'Relay error: ' + e.message }, 502, cors);
     }
-    return json({ ok: true, routes: ['/wx', '/metar', '/taf', '/isigmet', '/traffic', '/gairmet', '/plate', '/notams', '/oaip', '/sync', '/account'] }, url.pathname === '/' ? 200 : 404, cors);
+    return json({ ok: true, routes: ['/wx', '/metar', '/taf', '/isigmet', '/pirep', '/tfr', '/traffic', '/gairmet', '/plate', '/notams', '/oaip', '/sync', '/account'] }, url.pathname === '/' ? 200 : 404, cors);
   },
 };
