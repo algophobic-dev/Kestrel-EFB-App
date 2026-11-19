@@ -4,7 +4,7 @@ compatibility_date = "2026-01-01"
 
 [vars]
 # Sites allowed to use this relay, comma separated. Use your GitHub Pages address.
-ALLOWED_ORIGINS = "https://kestrelaviation.tech,https://efb.kestrelaviation.tech,https://app.efb.kestrelaviation.tech,https://algophobic-dev.github.io,http://localhost:8765"
+ALLOWED_ORIGINS = "https://kestrelaviation.tech,https://efb.kestrelaviation.tech,https://app.efb.kestrelaviation.tech,https://drone.kestrelaviation.tech,https://app.drone.kestrelaviation.tech,https://algophobic-dev.github.io,http://localhost:8765"
 
 # Storage for device sync (More > Sync in the app).
 [[kv_namespaces]]

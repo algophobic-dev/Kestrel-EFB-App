@@ -6,6 +6,7 @@
 //   GET /metar?ids=EGLL,RJTT  decoded METARs as JSON, worldwide (aviationweather.gov)
 //   GET /taf?ids=EGLL         TAFs as JSON, worldwide (aviationweather.gov)
 //   GET /isigmet              SIGMETs outside the US as GeoJSON (aviationweather.gov)
+//   GET /faa/{layer}/{x}/{y}    Kestrel Drone map layers (FAA UAS data, NPS parks) for one map square, kept 12 hours
 //   GET /pirep                 PIREPs from the last 2 hours, worldwide, as GeoJSON (aviationweather.gov)
 //   GET /tfr                   active TFRs with their shapes, as GeoJSON (tfr.faa.gov)
 //   GET /tfr/text?id=6/8596     one TFR's full text: times, altitudes, restrictions
@@ -43,6 +44,25 @@ async function sync(req, env, cors) {
 
 // Accounts. The app stretches the password before sending it (PBKDF2, salted with the username), so the password
 // itself never reaches the relay. The relay keeps a salted hash of what it receives, and of the recovery code.
+// Layers for Kestrel Drone. `tile` is the square size in degrees: small for the dense facility map grid, large for sparse layers.
+const FAA_AGO = 'https://services6.arcgis.com/ssFJjBXIUyZDrSYZ/arcgis/rest/services/';
+const DRONE_LAYERS = {
+  grid: { url: FAA_AGO + 'FAA_UAS_FacilityMap_Data/FeatureServer/0', tile: .25, fields: 'CEILING,MAP_EFF,APT1_FAAID,APT1_NAME,APT1_LAANC,APT2_FAAID,APT2_NAME,APT2_LAANC,APT3_FAAID,APT3_NAME,APT3_LAANC' },
+  class: { url: FAA_AGO + 'Class_Airspace/FeatureServer/0', tile: 1, simplify: .0003, where: "CLASS IN ('B','C','D') OR LOCAL_TYPE = 'CLASS_E2'",
+    fields: 'NAME,CLASS,LOCAL_TYPE,LOWER_VAL,LOWER_UOM,LOWER_CODE,UPPER_VAL,UPPER_UOM,UPPER_CODE,WKHR_RMK' },
+  sua: { url: FAA_AGO + 'Special_Use_Airspace/FeatureServer/0', tile: 1, simplify: .0003, where: "TYPE_CODE IN ('P','R')",
+    fields: 'NAME,TYPE_CODE,LOWER_VAL,LOWER_UOM,LOWER_CODE,UPPER_VAL,UPPER_UOM,UPPER_CODE,TIMESOFUSE' },
+  nsufr: { url: FAA_AGO + 'DoD_Mar_13/FeatureServer/0', tile: 1, simplify: .0001, fields: 'Facility,Base,Reason,Floor,Ceiling' },
+  ptnsufr: { url: FAA_AGO + 'Part_Time_National_Security_UAS_Flight_Restrictions/FeatureServer/0', tile: 5, simplify: .0001, fields: 'Facility,Reason,Floor,Ceiling,ADVISENOTE,ACTIVETIME,ENDTIME' },
+  nda: { url: FAA_AGO + 'National_Defense_Airspace_TFR_Areas/FeatureServer/0', tile: 5, simplify: .0003, fields: 'NAME,LOCAL_TYPE,WKHR_RMK' },
+  stadium: { url: FAA_AGO + 'Stadiums/FeatureServer/0', tile: 1, fields: 'NAME,CITY,STATE' },
+  fria: { url: FAA_AGO + 'FAA_Recognized_Identification_Areas/FeatureServer/0', tile: 1, simplify: .00005, fields: 'title,orgName,city,state,endDate' },
+  recsite: { url: FAA_AGO + 'Recreational_Flyer_Fixed_Sites/FeatureServer/0', tile: 1, simplify: .00005, fields: 'SITE_NAME,CEILING,UNIT,CITY,STATE' },
+  airport: { url: FAA_AGO + 'US_Airport/FeatureServer/0', tile: .5, fields: 'IDENT,ICAO_ID,NAME,TYPE_CODE,PRIVATEUSE,OPERSTATUS' },
+  park: { url: 'https://services1.arcgis.com/fBc8EJBxQRMcHlei/arcgis/rest/services/NPS_Land_Resources_Division_Boundary_and_Tract_Data_Service/FeatureServer/2',
+    tile: 1, simplify: .0005, fields: 'UNIT_NAME,UNIT_TYPE,UNIT_CODE' },
+};
+
 // NOTAM Management Service bearer token. It lasts 30 minutes; it is renewed 2 minutes early.
 let nmsCache = null;
 async function nmsToken(env, host) {
@@ -172,6 +192,43 @@ export default {
         return new Response(png, { headers: head });
       }
 
+      // FAA drone layers (and NPS park boundaries) for Kestrel Drone, one map square at a time.
+      // The FAA server allows 6,000 request units a minute for everyone, so each square is kept at the edge for 12 hours.
+      const sq = url.pathname.match(/^\/faa\/([a-z]+)\/(\d{1,4})\/(\d{1,4})$/);
+      if (sq) {
+        const L = DRONE_LAYERS[sq[1]];
+        if (!L) return json({ error: 'Unknown layer' }, 404, cors);
+        const x = +sq[2], y = +sq[3], w = -180 + x * L.tile, s = -90 + y * L.tile;
+        if (w >= 180 || s >= 90) return json({ error: 'Bad square' }, 400, cors);
+        // A copy is fresh for 12 hours and kept for 14 days. When the FAA server refuses (it is shared and rate limited),
+        // an older copy is served instead of an error.
+        const cacheKey = new Request(`${url.origin}/faa-cache/${sq[1]}/${x}/${y}`), hit = await caches.default.match(cacheKey);
+        const out = (body, age) => new Response(body, { headers: { ...cors, 'Content-Type': 'application/json', 'Cache-Control': 'public, max-age=3600', ...(age ? { 'X-Data-Age': String(age) } : {}) } });
+        const fetchedAt = hit ? +hit.headers.get('X-Fetched') || 0 : 0;
+        if (hit && Date.now() - fetchedAt < 432e5) return out(hit.body);
+        const features = [];
+        let failed = null;
+        pages: for (let page = 0; page < 6; page++) {
+          const q2 = `where=${encodeURIComponent(L.where || '1=1')}&geometry=${w},${s},${w + L.tile},${s + L.tile}&geometryType=esriGeometryEnvelope&inSR=4326&spatialRel=esriSpatialRelIntersects`
+            + `&outFields=${L.fields}&outSR=4326&geometryPrecision=5${L.simplify ? '&maxAllowableOffset=' + L.simplify : ''}&resultOffset=${page * 2000}&resultRecordCount=2000&f=geojson`;
+          for (let attempt = 0; attempt < 2; attempt++) {
+            const r = await fetch(`${L.url}/query?${q2}`, { headers: { 'User-Agent': 'kestrel-efb-relay' } });
+            const j = await r.json().catch(() => null);
+            if (r.ok && j && !j.error) { features.push(...(j.features || [])); if (!(j.exceededTransferLimit || j.properties?.exceededTransferLimit)) break pages; continue pages; }
+            failed = j?.error?.code || r.status;
+            if (attempt === 0) await new Promise(res => setTimeout(res, 1500));
+          }
+          break;
+        }
+        if (failed) {
+          if (hit) return out(hit.body, Math.round((Date.now() - fetchedAt) / 36e5) + 'h');
+          return json({ error: `FAA map server answered ${failed}. Try again in a minute.` }, 502, cors);
+        }
+        const body = JSON.stringify({ type: 'FeatureCollection', features });
+        await caches.default.put(cacheKey, new Response(body, { headers: { 'Content-Type': 'application/json', 'Cache-Control': 'public, max-age=1209600', 'X-Fetched': String(Date.now()) } }));
+        return out(body);
+      }
+
       // PIREPs and AIREPs from the last 2 hours, worldwide, as GeoJSON.
       if (url.pathname === '/pirep') {
         const r = await fetch('https://aviationweather.gov/api/data/pirep?format=geojson&age=2&bbox=-90,-180,90,180', { headers: { 'User-Agent': 'kestrel-efb-relay' } });
@@ -269,6 +326,6 @@ export default {
     } catch (e) {
       return json({ error: 'Relay error: ' + e.message }, 502, cors);
     }
-    return json({ ok: true, routes: ['/wx', '/metar', '/taf', '/isigmet', '/pirep', '/tfr', '/traffic', '/gairmet', '/plate', '/notams', '/oaip', '/sync', '/account'] }, url.pathname === '/' ? 200 : 404, cors);
+    return json({ ok: true, routes: ['/wx', '/metar', '/taf', '/isigmet', '/faa', '/pirep', '/tfr', '/traffic', '/gairmet', '/plate', '/notams', '/oaip', '/sync', '/account'] }, url.pathname === '/' ? 200 : 404, cors);
   },
 };
