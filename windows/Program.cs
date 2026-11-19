@@ -27,7 +27,9 @@ static class Program
 
 sealed class MainForm : Form
 {
-    const string SiteUrl = "https://algophobic-dev.github.io/Kestrel-EFB-App/";
+    const string SiteUrl = "https://app.efb.kestrelaviation.tech/";
+    // The app's own addresses. The old GitHub address redirects to the new one, so both stay in the window.
+    static readonly HashSet<string> AppHosts = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "app.efb.kestrelaviation.tech", "algophobic-dev.github.io" };
     const string Help = "https://github.com/algophobic-dev/Kestrel-EFB-App#readme";
     const string OfflinePage =
         "<html><body style=\"margin:0;height:100vh;display:grid;place-items:center;background:#10161a;color:#eef3f6;font:15px Segoe UI,sans-serif;text-align:center\">" +
@@ -85,7 +87,7 @@ sealed class MainForm : Form
             Uri uri;
             if (!Uri.TryCreate(e.Uri, UriKind.Absolute, out uri)) return;
             bool isWeb = uri.Scheme == "http" || uri.Scheme == "https";
-            if (isWeb && !string.Equals(uri.Host, new Uri(SiteUrl).Host, StringComparison.OrdinalIgnoreCase)) { e.Cancel = true; OpenExternal(e.Uri); }
+            if (isWeb && !AppHosts.Contains(uri.Host)) { e.Cancel = true; OpenExternal(e.Uri); }
         };
         core.NavigationCompleted += (s, e) =>
         {
@@ -228,7 +230,7 @@ sealed class MainForm : Form
 
         strip.Items.Add(Menu("&Help",
             Item("Kestrel EFB &Help", () => OpenExternal(Help), Keys.F1),
-            Item("&About Kestrel EFB", () => MessageBox.Show(this, "Kestrel EFB 1.3\nFree flight planning for pilots.", "About Kestrel EFB", MessageBoxButtons.OK, MessageBoxIcon.Information))));
+            Item("&About Kestrel EFB", () => MessageBox.Show(this, "Kestrel EFB 1.4\nFree flight planning for pilots.", "About Kestrel EFB", MessageBoxButtons.OK, MessageBoxIcon.Information))));
         return strip;
     }
 

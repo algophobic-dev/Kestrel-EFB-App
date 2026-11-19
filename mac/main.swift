@@ -4,7 +4,9 @@
 import Cocoa
 import WebKit
 
-let siteURL = URL(string: "https://algophobic-dev.github.io/Kestrel-EFB-App/")!
+let siteURL = URL(string: "https://app.efb.kestrelaviation.tech/")!
+/// The app's own addresses. The old GitHub address redirects to the new one, so both stay in the window.
+let appHosts: Set<String> = ["app.efb.kestrelaviation.tech", "algophobic-dev.github.io"]
 let helpURL = URL(string: "https://github.com/algophobic-dev/Kestrel-EFB-App#readme")!
 
 final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKUIDelegate, WKDownloadDelegate, WKScriptMessageHandler {
@@ -243,7 +245,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         let isWeb = scheme == "http" || scheme == "https"
         let mainFrame = action.targetFrame?.isMainFrame ?? true
         // Keep the app's own pages in the window. Send every other site to the default browser.
-        if isWeb && mainFrame && url.host != siteURL.host {
+        if isWeb && mainFrame && !appHosts.contains(url.host ?? "") {
             NSWorkspace.shared.open(url); decisionHandler(.cancel); return
         }
         decisionHandler(.allow)

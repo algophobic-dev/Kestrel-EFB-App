@@ -2,8 +2,9 @@
 
 A free flight-planning app for pilots, with airports and weather worldwide. It runs in the browser and installs on Mac, Windows, iPad and iPhone.
 
-- Website: https://algophobic-dev.github.io/Kestrel-EFB/
-- App: https://algophobic-dev.github.io/Kestrel-EFB-App/
+- Website: https://efb.kestrelaviation.tech
+- App: https://app.efb.kestrelaviation.tech
+- By Kestrel Aviation Solutions: https://kestrelaviation.tech
 
 Provided as is, with no warranty. Data comes from public sources and is not verified.
 

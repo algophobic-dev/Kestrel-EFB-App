@@ -12,7 +12,7 @@
     <ApplicationIcon>app.ico</ApplicationIcon>
     <Product>Kestrel EFB</Product>
     <Description>Free flight planning for pilots.</Description>
-    <Version>1.3.0</Version>
+    <Version>1.4.0</Version>
 
     <!-- One .exe that needs no .NET install on the user's PC. -->
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
