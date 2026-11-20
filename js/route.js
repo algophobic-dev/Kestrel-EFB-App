@@ -33,7 +33,8 @@ export const removeToken = i => { const t = plan.text.split(' '); t.splice(i, 1)
 export const reverse = () => setPlan({ text: plan.text.split(' ').reverse().join(' ') });
 
 export async function parse(text) {
-  const toks = text.toUpperCase().split(/[\s.]+/).filter(Boolean);
+  // Dots separate route elements (KLUK.HYK), except inside a lat/lon point such as 40.08/116.60.
+  const toks = text.toUpperCase().split(/\s+/).flatMap(t => /^-?\d+(\.\d+)?[,/]-?\d+(\.\d+)?$/.test(t) ? [t] : t.split('.')).filter(Boolean);
   const points = [], chips = [], errors = [];
   for (let i = 0; i < toks.length; i++) {
     const t = toks[i], prev = points[points.length - 1];

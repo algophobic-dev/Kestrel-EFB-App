@@ -1,5 +1,5 @@
 // Suggest a route along airways: shortest path through the airway network between two airports.
-import { part, nearby } from './db.js';
+import { part, nearby, resolve } from './db.js';
 import { dist, along } from './geo.js';
 
 let nodesP;
@@ -66,7 +66,8 @@ function trace(dep, arr, end, prev) {
 // RNAV direct: the great circle, through a named fix about every 150 nm, as GPS aircraft file today.
 // Fixes on high airways are preferred, so the points are ones ATC knows; elsewhere any fix or navaid near the line is used.
 export async function rnavRoute(dep, arr) {
-  const total = dist(dep, arr), n = Math.floor(total / 150);
+  // About every 150 nm, but no more than 20 waypoints on long routes.
+  const total = dist(dep, arr), n = Math.min(20, Math.floor(total / 150));
   if (n < 1) return { text: `${dep.id} ${arr.id}`, d: total };
   const nodes = await graph(), high = nodes.filter(x => x.adj.some(e => e.cls === 'high'));
   const toks = [dep.id], pts = [dep];
@@ -74,8 +75,12 @@ export async function rnavRoute(dep, arr) {
     const p = along(dep, arr, i / (n + 1));
     let best = null, bd = 40;
     for (const x of high) if (Math.abs(x.lat - p.lat) < 1) { const d = dist(p, x); if (d < bd) { bd = d; best = x; } }
-    const named = best && nearby(best, 1.5, ['nav', 'fix'], 1)[0] || nearby(p, 30, ['nav', 'fix'], 1)[0];
-    if (named && named.id !== toks[toks.length - 1]) { toks.push(named.id); pts.push(named); }
+    let named = best && nearby(best, 1.5, ['nav', 'fix'], 1)[0] || nearby(p, 30, ['nav', 'fix'], 1)[0];
+    // Short navaid codes repeat around the world. Use a name only if it reads back as this same point after the last
+    // waypoint; otherwise use the position itself.
+    const back = named && resolve(named.id, pts[pts.length - 1]);
+    if (!back || dist(back, named) > 1) named = { id: `${p.lat.toFixed(2)}/${p.lon.toFixed(2)}`, lat: +p.lat.toFixed(2), lon: +p.lon.toFixed(2) };
+    if (named.id !== toks[toks.length - 1]) { toks.push(named.id); pts.push(named); }
   }
   toks.push(arr.id); pts.push(arr);
   let d = 0; for (let i = 1; i < pts.length; i++) d += dist(pts[i - 1], pts[i]);
