@@ -196,20 +196,34 @@ function pumpCats() {
 setInterval(() => { cats.clear(); drawAero(); }, 10 * 6e4);
 
 // ---------- route
+// Keep each point within 180° of longitude of the one before, so a line crossing the 180° meridian carries on into the
+// next copy of the world instead of jumping back across the whole map.
+function unwrap(list) {
+  const out = [];
+  for (const [lat, lon] of list) {
+    let l = lon;
+    if (out.length) { const prev = out[out.length - 1][1]; while (l - prev > 180) l -= 360; while (l - prev < -180) l += 360; }
+    out.push([lat, l]);
+  }
+  return out;
+}
+let routeLine = [];
 function drawRoute(r) {
-  routeL.clearLayers();
+  routeL.clearLayers(); routeLine = [];
   const pts = r.points; if (!pts.length) return;
-  const line = [];
-  for (let i = 1; i < pts.length; i++) { const n = Math.max(2, Math.ceil(dist(pts[i - 1], pts[i]) / 25)); for (let k = 0; k < n; k++) { const p = along(pts[i - 1], pts[i], k / n); line.push([p.lat, p.lon]); } }
-  line.push([pts[pts.length - 1].lat, pts[pts.length - 1].lon]);
+  const raw = [], at = [0];
+  for (let i = 1; i < pts.length; i++) { const n = Math.max(2, Math.ceil(dist(pts[i - 1], pts[i]) / 25)); for (let k = 0; k < n; k++) { const p = along(pts[i - 1], pts[i], k / n); raw.push([p.lat, p.lon]); } at.push(raw.length); }
+  raw.push([pts[pts.length - 1].lat, pts[pts.length - 1].lon]);
+  const line = routeLine = unwrap(raw);
   L.polyline(line, { color: '#000', weight: 8, opacity: .35, interactive: false }).addTo(routeL);
   L.polyline(line, { color: '#e23bf0', weight: 4.5, interactive: false }).addTo(routeL);
-  pts.forEach(p => mk(p, 'rt', p.kind === 'll' ? '' : p.id).addTo(routeL));
+  // Waypoint labels go on the same copy of the world as the line.
+  pts.forEach((p, i) => mk({ ...p, lon: line[Math.min(at[i], line.length - 1)][1] }, 'rt', p.kind === 'll' ? '' : p.id).addTo(routeL));
 }
 export function fitRoute() {
   const pts = current.points;
   map.invalidateSize();
-  if (pts.length > 1) map.fitBounds(L.latLngBounds(pts.map(p => [p.lat, p.lon])).pad(.15));
+  if (pts.length > 1 && routeLine.length) map.fitBounds(L.latLngBounds(routeLine).pad(.15));
   else if (pts.length) map.setView([pts[0].lat, pts[0].lon], 10);
   else if (own) map.setView([own.lat, own.lon], 10);
   else toast('Enter a route or turn on Follow to center the map.');
@@ -351,7 +365,7 @@ function toggleRec() {
   }
 }
 export function showTrack(t) {
-  const line = L.polyline(t.pts.map(p => [p[0], p[1]]), { color: '#43c463', weight: 3 }).addTo(routeL);
+  const line = L.polyline(unwrap(t.pts.map(p => [p[0], p[1]])), { color: '#43c463', weight: 3 }).addTo(routeL);
   map.fitBounds(line.getBounds().pad(.2));
 }
 
